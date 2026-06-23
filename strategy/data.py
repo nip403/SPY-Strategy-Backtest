@@ -12,7 +12,6 @@ def request(*, ticker: str = "SPY", config: dict, start: datetime = datetime(201
         print(f"Loading data from local cache: {cache_filename}")
         return pd.read_parquet(cache_filename)
         
-    # 2. If no cache exists, fetch from Alpaca API
     print("Cache not found. Fetching from Alpaca API...")
     client = StockHistoricalDataClient(
         api_key=config["key"], 
