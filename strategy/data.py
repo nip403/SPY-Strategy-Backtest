@@ -3,8 +3,17 @@ from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 import pandas as pd
 from datetime import datetime
+import os
 
-def request(*, ticker: str = "SPY", config: dict, start: datetime = datetime(2017, 1, 1), end: datetime = datetime(2026, 6, 20)) -> pd.DataFrame:
+def request(*, ticker: str = "SPY", config: dict, start: datetime = datetime(2017, 1, 1), end: datetime = datetime(2026, 6, 20), use_cache: bool = True) -> pd.DataFrame:
+    cache_filename = f"cache_{ticker}_{start.strftime('%Y%m%d')}_{end.strftime('%Y%m%d')}.parquet"
+    
+    if use_cache and os.path.exists(cache_filename):
+        print(f"Loading data from local cache: {cache_filename}")
+        return pd.read_parquet(cache_filename)
+        
+    # 2. If no cache exists, fetch from Alpaca API
+    print("Cache not found. Fetching from Alpaca API...")
     client = StockHistoricalDataClient(
         api_key=config["key"], 
         secret_key=config["secret"]
@@ -19,9 +28,14 @@ def request(*, ticker: str = "SPY", config: dict, start: datetime = datetime(201
         )
     )
     
-    return preprocess(bars.df)
+    df = _preprocess(bars.df)
+    
+    print(f"Saving fetched data to local cache: {cache_filename}")
+    df.to_parquet(cache_filename)
+    
+    return df
 
-def preprocess(alpaca_df: pd.DataFrame) -> pd.DataFrame:
+def _preprocess(alpaca_df: pd.DataFrame) -> pd.DataFrame:
     """
     US equity intraday minute data
     """
@@ -40,9 +54,3 @@ def preprocess(alpaca_df: pd.DataFrame) -> pd.DataFrame:
     df["time"] = df.index.time
     
     return df.dropna()
-
-def main() -> None:
-    pass
-
-if __name__ == "__main__":
-    main()
