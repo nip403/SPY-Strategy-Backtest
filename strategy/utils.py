@@ -1,7 +1,9 @@
 import statsmodels.api as sm
+import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 from datetime import date
+from typing import Optional
 
 def round_date(date_index: pd.DataFrame, dt: date) -> date:
     dates = pd.Index(date_index.date).unique()
@@ -24,9 +26,10 @@ def round_date(date_index: pd.DataFrame, dt: date) -> date:
 class Tearsheet:
     def __init__(self):
         self._metrics = [
-            "Total Days", "Average Trades / Day",
-            "Cum. Return", "Ann. Return", "Avg. Daily Return",
+            "Total Days", 
+            "Cum. Return", "Ann. Return", "Avg. Daily Return", "Ret. Skew", "Ret. Kurtosis",
             "Max Gain", "Best Day", "Max Loss", "Worst Day", "Win Rate", "Daily Win Rate",
+            "Average Trades / Day", "Average Return / Trade",# "Average PnL / Share",
             "Alpha", "Beta", "Ann. Volatility", 
             "Max Drawdown", "Max DD Days", "95% VaR", 
             "Sharpe Ratio", "Sortino Ratio", "Calmar Ratio", "Information Ratio"
@@ -34,16 +37,20 @@ class Tearsheet:
         
         self._attrs = {
             "total_days": "Total Days",
-            "trades_per_day": "Average Trades / Day",
             "cum_return": "Cum. Return",
             "ann_return": "Ann. Return",
             "avg_daily_return": "Avg. Daily Return",
+            "skew": "Ret. Skew", 
+            "kurt": "Ret. Kurtosis",
             "max_gain": "Max Gain",
             "best_day": "Best Day",
             "max_loss": "Max Loss",
             "worst_day": "Worst Day",
             "win_rate": "Win Rate",
             "daily_win_rate": "Daily Win Rate",
+            "trades_per_day": "Average Trades / Day",
+            "return_per_trade": "Average Return / Trade",
+            #"pnl_per_share": "Average PnL / Share",
             "alpha": "Alpha",
             "beta": "Beta",
             "ann_vol": "Ann. Volatility",
@@ -58,18 +65,20 @@ class Tearsheet:
         
         self._data = {metric: [] for metric in self._metrics}
         
-    def generate(self, df: pd.DataFrame) -> "Tearsheet":
+    def generate(self, df: pd.DataFrame, plot_returns: Optional[bool] = True) -> "Tearsheet":
         equity = df[["strat_equity", "bench_equity"]]
         ret = df[["strat_ret", "bench_ret"]]
         dd = df[["strat_dd", "bench_dd"]]
         days = len(df.index)
         
         self.total_days = days
-        self.trades_per_day = [df["trade_count"].mean(), None]
         
         self.cum_return = (1 + ret).prod().values - 1
         self.ann_return = (equity.iloc[-1] / equity.iloc[0]).values ** (252 / days) - 1
         self.avg_daily_return = ret.mean().values # arithmetic mean
+        
+        self.skew = ret.skew().values.tolist()
+        self.kurt = ret.kurt().values.tolist()
         
         self.max_gain = ret.max().values 
         self.best_day = ret.idxmax().values
@@ -77,6 +86,9 @@ class Tearsheet:
         self.worst_day = ret.idxmin().values
         self.win_rate = [df.loc[df["strat_ret"] > 0, "trade_count"].sum() / df["trade_count"].sum(), None] # simplified calculation using agg data, not accurate
         self.daily_win_rate = (ret > 0).mean().values # daily, not per trade
+        
+        self.trades_per_day = [df["trade_count"].mean(), None]
+        self.return_per_trade = [(self.cum_return[0] / df["trade_count"].sum()), None]
         
         # OLS, risk free not used
         model = sm.OLS(df["strat_ret"], sm.add_constant(df["bench_ret"])).fit()
@@ -106,7 +118,51 @@ class Tearsheet:
         tracking_error = (df["strat_ret"] - df["bench_ret"]).std() * np.sqrt(252)
         self.information_ratio = [(self.ann_return[0] - self.ann_return[1]) / tracking_error if tracking_error != 0 else 0.0, None] # edge relative to unit benchmark risk
         
+        if plot_returns:
+            self._plot_returns(ret)
+        
         return self
+    
+    def _plot_returns(self, ret: pd.DataFrame) -> None:
+        fig, ax = plt.subplots(figsize=(12, 7)) 
+        
+        ax.hist(ret["strat_ret"], bins=50, color="blue", alpha=0.45, label="Strategy", edgecolor="darkblue", density=True)
+        ax.hist(ret["bench_ret"], bins=50, color="orange", alpha=0.45, label="Benchmark", edgecolor="darkorange", density=True)
+        
+        ax.set_title("Daily Returns Distribution", fontsize=12, fontweight="bold", pad=10)
+        ax.set_xlabel("Daily Return", fontsize=10)
+        ax.set_ylabel("Probability Density", fontsize=10)
+        ax.legend(loc="upper left", frameon=True)
+        xlim = max(ret["strat_ret"].abs().max(), ret["bench_ret"].abs().max()) * 1.05
+        ax.set_xlim(-xlim, xlim)
+
+        stats_text = (
+            "--- Strategy ---\n"
+            f"Mean: {ret["strat_ret"].mean()*100:.3f}%\n"
+            f"Std:  {ret["strat_ret"].std()*100:.3f}%\n"
+            f"Skew: {ret["strat_ret"].skew():.3f}\n"
+            f"Kurt: {ret["strat_ret"].kurt():.3f}\n\n"
+            "--- Benchmark ---\n"
+            f"Mean: {ret["bench_ret"].mean()*100:.3f}%\n"
+            f"Std:  {ret["bench_ret"].std()*100:.3f}%\n"
+            f"Skew: {ret["bench_ret"].skew():.3f}\n"
+            f"Kurt: {ret["bench_ret"].kurt():.3f}"
+        )
+
+        ax.text(
+            0.97, 0.97, stats_text, 
+            transform=ax.transAxes, 
+            fontsize=12, 
+            fontfamily="monospace",
+            horizontalalignment="right", 
+            verticalalignment="top",
+            bbox=dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.92, edgecolor="darkgray")
+        )
+
+        ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x*100:.1f}%"))
+
+        plt.tight_layout()
+        plt.show()
 
     def __getattr__(self, name: str):
         if name in self._attrs:
