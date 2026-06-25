@@ -153,7 +153,7 @@ class Portfolio:
         sliced = self.stats[start:end].copy()
         sliced[["strat_equity", "bench_equity"]] *= self.aum / sliced[["strat_equity", "bench_equity"]].iloc[0].values
         
-        return Tearsheet().generate(sliced)
+        return Tearsheet().generate(sliced, plot_returns=plot)
         
     def _daily_result(self, dt: date, plot: bool) -> Tearsheet:
         plot_df = self.df.loc[str(dt)] # date string slicing

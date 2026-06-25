@@ -235,7 +235,7 @@ class Tearsheet:
         
         pct_metrics = {
             "Cum. Return", "Ann. Return", "Avg. Daily Return", 
-            "Max Gain", "Max Loss", "Win Rate", "Daily Win Rate"
+            "Max Gain", "Max Loss", "Win Rate", "Daily Win Rate",
             "Ann. Volatility", "Max Drawdown", "95% VaR"
         }
 
