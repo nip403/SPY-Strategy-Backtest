@@ -1,30 +1,41 @@
+from __future__ import annotations
+
 import statsmodels.api as sm
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 import pandas as pd
 import numpy as np
-from datetime import date
 from typing import Optional
 
-def round_date(date_index: pd.DataFrame, dt: date) -> date:
-    dates = pd.Index(date_index.date).unique()
-    dt = pd.to_datetime(dt)
-    dt = dt.tz_localize(date_index.tz).date() if dt.tz is None else dt.tz_convert(date_index.tz).date()
+def sharpe_curve(df: pd.DataFrame, portfolio: Portfolio, aum: Optional[list[int]] = None, base: Optional[int] = None) -> None:
+    aum = aum or [i * (10 ** k) for k in range(4, 12) for i in range(1, 10)] + [1e12]
+    sharpes = [portfolio(df, i).sharpe for i in aum]
     
-    pos = dates.searchsorted(dt)
+    base = sharpes[aum.index(base) if base in aum else 0] # base: baseline/benchmark portfolio (in $ aum)
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    ax.plot(aum, sharpes, color="blue", label="Sharpe")
+
+    ax.axhline(base, color="gray", linestyle="--", linewidth=1, label=f"Base Sharpe ({base:.2f})")
+    ax.axhline(base * 0.5, color="red", linestyle="--", linewidth=1, label=f"50% Base ({base * 0.5:.2f})")
+    ax.axhline(0, color="black", linestyle="-", linewidth=1, label="Risk Free")
+
+    ax.set_xscale("log")
+    ax.set_xlim(min(aum), max(aum))
+
+    ax.set_xlabel("AUM ($)")
+    ax.set_ylabel("Sharpe Ratio")
+    ax.set_title("Strategy Capacity: Sharpe vs AUM", fontweight="bold")
+
+    ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"${x:,.0f}"))
+    ax.legend()
     
-    if not pos:
-        return dates[0]
-    
-    if pos == len(dates):
-        return dates[-1]
-    
-    before = dates[pos - 1]
-    after = dates[pos]
-    
-    return before if (dt - before) <= (after - dt) else after
+    plt.tight_layout()
+    plt.show()
 
 class Tearsheet:
-    def __init__(self):
+    def __init__(self) -> None:
         self._metrics = [
             "Total Days", 
             "Cum. Return", "Ann. Return", "Avg. Daily Return", "Ret. Skew", "Ret. Kurtosis",
@@ -74,7 +85,7 @@ class Tearsheet:
         self.total_days = days
         
         self.cum_return = (1 + ret).prod().values - 1
-        self.ann_return = (equity.iloc[-1] / equity.iloc[0]).values ** (252 / days) - 1
+        self.ann_return = (equity.iloc[-1] / equity.iloc[0]).values ** (252 / days) - 1 # geometric
         self.avg_daily_return = ret.mean().values # arithmetic mean
         
         self.skew = ret.skew().values.tolist()
@@ -107,7 +118,7 @@ class Tearsheet:
             for col in ["strat_dd", "bench_dd"]
         ]
         
-        self.sharpe_ratio = np.array(self.ann_return) / np.array(self.ann_vol)
+        self.sharpe_ratio = np.array(self.avg_daily_return) * 252 / np.array(self.ann_vol)
 
         ann_downside_vol = ret.apply(lambda col: col[col < 0].std()).values * np.sqrt(252)
         self.sortino_ratio = (np.array(self.ann_return) / np.where(ann_downside_vol == 0, 1e-6, ann_downside_vol)).tolist()
@@ -116,7 +127,7 @@ class Tearsheet:
         self.calmar_ratio = (np.array(self.ann_return) / np.where(abs_max_dd == 0, 1e-6, abs_max_dd)).tolist()
 
         tracking_error = (df["strat_ret"] - df["bench_ret"]).std() * np.sqrt(252)
-        self.information_ratio = [(self.ann_return[0] - self.ann_return[1]) / tracking_error if tracking_error != 0 else 0.0, None] # edge relative to unit benchmark risk
+        self.information_ratio = [(ret["strat_ret"].mean() - ret["bench_ret"].mean()) * 252 / tracking_error, None]  # edge relative to unit benchmark risk
         
         if plot_returns:
             self._plot_returns(ret)
@@ -276,3 +287,8 @@ class Tearsheet:
                 lines.append(f"{metric:<{w_metric}}{s:>{w_col}}{b:>{w_col}}")
 
         return "\n".join(lines)
+    
+class PortfolioDecomposer:
+    def __init__(self, portfolio: Portfolio) -> None:
+        pass
+    

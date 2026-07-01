@@ -5,26 +5,27 @@ import pandas as pd
 import numpy as np
 from datetime import date
 from typing import Optional
-from .utils import round_date, Tearsheet
+from .utils import round_date
+from .analysis import Tearsheet
 
 class Portfolio:
     # per share frictions    
-    commission = 0.0035
-    slippage = 0.001
+    COMMISSION = 0.0035
+    SLIPPAGE = 0.001
     
-    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02):
+    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02) -> None:
         self.aum = aum
         self.target_vol = target_vol
-        self.frictions = self.commission + self.slippage
+        self.frictions = self.COMMISSION + self.SLIPPAGE
         
-        self.df = self._backtest(df)
+        self.df = self._backtest(df.copy())
         
         self.t0 = self.df.index[0].date()
         self.t1 = self.df.index[-1].date()
         
         self.stats = self._aggregate()
         
-    def _backtest(self, df: pd.DataFrame) -> pd.DataFrame:      
+    def _preprocess(self, df: pd.DataFrame) -> pd.DataFrame:      
         # position sizing
         closes = df.groupby(df.index.date)["close"].last()
         returns = closes.pct_change()
@@ -42,6 +43,11 @@ class Portfolio:
 
         df["long_stop"] = df[["upper_bound", "vwap"]].max(axis=1)
         df["short_stop"] = df[["lower_bound", "vwap"]].min(axis=1)
+        
+        return df
+        
+    def _backtest(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = self._preprocess(df)
         
         # signal generation
         intervals = df.index.minute.isin([0, 30])
@@ -62,12 +68,10 @@ class Portfolio:
 
         df["position"] = df["position"].ffill().fillna(0) * (self.target_vol / df["std"]).clip(lower=-4, upper=4) 
         
-        held_position = df["position"].shift(1).fillna(0)
-        df["gross_ret"] = held_position * df["ret"]
+        df["gross_ret"] = df["position"].shift(1).fillna(0) * df["ret"]
 
         # frictions: # net of costs: cost% = delta(position) * leverage / cost/share, incurred at the minute position changes
         df["net_ret"] = df["gross_ret"] - (df["position"].diff().abs().fillna(0) * self.frictions / df["close"])
-
         df["cum_ret"] = (1 + df["net_ret"].fillna(0)).cumprod()
         df["equity_curve"] = self.aum * df["cum_ret"]
         
@@ -111,6 +115,10 @@ class Portfolio:
             "bench_dd": bench_dd,
             "trade_count": trade_count,
         })
+        
+    @property
+    def sharpe(self) -> float:
+        return float((r := self.stats["strat_ret"]).mean() / r.std() * 252**0.5)
     
     def result(self, *, date: Optional[date] = None, start: Optional[date] = None, end: Optional[date] = None, plot: Optional[bool] = True) -> Tearsheet: 
         """
