@@ -3,10 +3,10 @@ import numpy as np
 from ..core import Portfolio
 
 class PortfolioRollingImmediateStop(Portfolio):
-    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, entry_window: int = 30) -> None:
+    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, entry_window: int = 30, long_permissions: Optional[bool] = True, short_permissions: Optional[bool] = True) -> None:
         self.conf = entry_window
         
-        super().__init__(df=df, aum=aum, target_vol=target_vol)
+        super().__init__(df=df, aum=aum, target_vol=target_vol, long_permissions=long_permissions, short_permissions=short_permissions)
 
     def _backtest(self, df: pd.DataFrame) -> pd.DataFrame:  
         df = self._preprocess(df)
@@ -15,8 +15,8 @@ class PortfolioRollingImmediateStop(Portfolio):
         raw_long_entry = df["close"] > df["upper_bound"]
         raw_short_entry = df["close"] < df["lower_bound"]
 
-        long_entry = raw_long_entry.rolling(window=self.conf).sum() == self.conf
-        short_entry = raw_short_entry.rolling(window=self.conf).sum() == self.conf
+        long_entry = (raw_long_entry.rolling(window=self.conf).sum() == self.conf) & self.long_perm
+        short_entry = (raw_short_entry.rolling(window=self.conf).sum() == self.conf) & self.short_perm
         
         # exit signal (triggers immediately upon crossing boundary)
         long_exit = df["close"] < df["long_stop"]
@@ -43,10 +43,10 @@ class PortfolioRollingImmediateStop(Portfolio):
     
 # isolate confirmation effect
 class PortfolioRollingIntervalStop(Portfolio):
-    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, entry_window: int = 30) -> None:
+    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, entry_window: int = 30, long_permissions: Optional[bool] = True, short_permissions: Optional[bool] = True) -> None:
         self.conf = entry_window
         
-        super().__init__(df=df, aum=aum, target_vol=target_vol)
+        super().__init__(df=df, aum=aum, target_vol=target_vol, long_permissions=long_permissions, short_permissions=short_permissions)
 
     def _backtest(self, df: pd.DataFrame) -> pd.DataFrame:  
         df = self._preprocess(df)
@@ -55,8 +55,8 @@ class PortfolioRollingIntervalStop(Portfolio):
         raw_long_entry = df["close"] > df["upper_bound"]
         raw_short_entry = df["close"] < df["lower_bound"]
 
-        long_entry = raw_long_entry.rolling(window=self.conf).sum() == self.conf
-        short_entry = raw_short_entry.rolling(window=self.conf).sum() == self.conf
+        long_entry = (raw_long_entry.rolling(window=self.conf).sum() == self.conf) & self.long_perm
+        short_entry = (raw_short_entry.rolling(window=self.conf).sum() == self.conf) & self.short_perm
         
         # exit signal (evaluated semi hourly)
         intervals = df.index.minute.isin([0, 30])

@@ -3,8 +3,8 @@ import numpy as np
 from ..core import Portfolio
 
 class PortfolioQuarterHourSample(Portfolio):
-    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02) -> None:
-        super().__init__(df=df, aum=aum, target_vol=target_vol)
+    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, long_permissions: Optional[bool] = True, short_permissions: Optional[bool] = True) -> None:
+        super().__init__(df=df, aum=aum, target_vol=target_vol, long_permissions=long_permissions, short_permissions=short_permissions)
         
     def _backtest(self, df: pd.DataFrame) -> pd.DataFrame:      
         df = self._preprocess(df)
@@ -12,8 +12,8 @@ class PortfolioQuarterHourSample(Portfolio):
         entry_intervals = df.index.minute.isin([0, 15, 30, 45])
         exit_intervals = df.index.minute.isin([0, 30])
         
-        long_entry = (df["close"] > df["upper_bound"]) & entry_intervals
-        short_entry = (df["close"] < df["lower_bound"]) & entry_intervals
+        long_entry = (df["close"] > df["upper_bound"]) & entry_intervals & self.long_perm
+        short_entry = (df["close"] < df["lower_bound"]) & entry_intervals & self.short_perm
 
         long_exit = (df["close"] < df["long_stop"]) & exit_intervals
         short_exit = (df["close"] > df["short_stop"]) & exit_intervals

@@ -9,14 +9,17 @@ from .utils import round_date
 from .analysis import Tearsheet, PortfolioDecomposer
 
 class Portfolio:
-    # per share frictions    
+    # per share frictions, naive 
     COMMISSION = 0.0035
     SLIPPAGE = 0.001
     
-    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02) -> None:
+    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, long_permissions: Optional[bool] = True, short_permissions: Optional[bool] = True) -> None:
         self.aum = aum
         self.target_vol = target_vol
         self.frictions = self.COMMISSION + self.SLIPPAGE
+        
+        self.long_perm = long_permissions
+        self.short_perm = short_permissions
         
         self.df = self._backtest(df.copy())
         
@@ -51,8 +54,8 @@ class Portfolio:
         
         # signal generation
         intervals = df.index.minute.isin([0, 30])
-        long_entry = (df["close"] > df["upper_bound"]) & intervals
-        short_entry = (df["close"] < df["lower_bound"]) & intervals
+        long_entry = (df["close"] > df["upper_bound"]) & intervals & self.long_perm
+        short_entry = (df["close"] < df["lower_bound"]) & intervals & self.short_perm
 
         long_exit = (df["close"] < df["long_stop"]) & intervals
         short_exit = (df["close"] > df["short_stop"]) & intervals
@@ -177,7 +180,7 @@ class Portfolio:
                 plot_df.index, 
                 plot_df["lower_bound"], 
                 plot_df["upper_bound"], 
-                color="yellow", 
+                color="yellow",
                 alpha=0.3, 
                 label="Noise Area"
             )
@@ -191,11 +194,11 @@ class Portfolio:
             ax1.margins(x=0) 
 
             ax2.step(
-                plot_df.index, 
-                plot_df["position"], 
-                color="blue", 
-                where="post", 
-                linewidth=1.5, 
+                plot_df.index,
+                plot_df["position"],
+                color="blue",
+                where="post",
+                linewidth=1.5,
                 label="Leverage Factor"
             )
 

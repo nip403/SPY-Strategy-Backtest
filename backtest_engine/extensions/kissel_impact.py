@@ -14,7 +14,7 @@ class PortfolioDynamicCost(Portfolio):
         "lookback": 20, # 1 trading mth
     }
     
-    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, coeff_config: Optional[dict] = None) -> None:
+    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, coeff_config: Optional[dict] = None, long_permissions: Optional[bool] = True, short_permissions: Optional[bool] = True) -> None:
         self._config = {**self.DEFAULT_PARAMS, **(coeff_config or {})}
         
         self.a1 = self._config["a1"]
@@ -25,15 +25,15 @@ class PortfolioDynamicCost(Portfolio):
         
         self.lookback_window = self._config["lookback"]
         
-        super().__init__(df=df, aum=aum, target_vol=target_vol)
+        super().__init__(df=df, aum=aum, target_vol=target_vol, long_permissions=long_permissions, short_permissions=short_permissions)
  
     def _backtest(self, df: pd.DataFrame) -> pd.DataFrame:
         df = self._preprocess(df)
  
         # signal generation
         intervals = df.index.minute.isin([0, 30])
-        long_entry = (df["close"] > df["upper_bound"]) & intervals
-        short_entry = (df["close"] < df["lower_bound"]) & intervals
+        long_entry = (df["close"] > df["upper_bound"]) & intervals & self.long_perm
+        short_entry = (df["close"] < df["lower_bound"]) & intervals & self.short_perm
  
         long_exit = (df["close"] < df["long_stop"]) & intervals
         short_exit = (df["close"] > df["short_stop"]) & intervals
