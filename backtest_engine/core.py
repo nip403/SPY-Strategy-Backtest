@@ -6,7 +6,8 @@ import numpy as np
 from datetime import date
 from typing import Optional
 from .utils import round_date
-from .analysis import Tearsheet, PortfolioDecomposer
+from .analysis.tearsheet import Tearsheet
+from .analysis.decomposition import PortfolioDecomposer
 
 class Portfolio:
     # per share frictions, naive 
