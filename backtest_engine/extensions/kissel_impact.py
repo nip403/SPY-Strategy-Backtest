@@ -15,15 +15,15 @@ class PortfolioDynamicCost(Portfolio):
     }
     
     def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, coeff_config: Optional[dict] = None) -> None:
-        config = {**self.DEFAULT_PARAMS, **(coeff_config or {})}
+        self._config = {**self.DEFAULT_PARAMS, **(coeff_config or {})}
         
-        self.a1 = config["a1"]
-        self.a2 = config["a2"]
-        self.a3 = config["a3"]
-        self.a4 = config["a4"]
-        self.b1 = config["b1"]
+        self.a1 = self._config["a1"]
+        self.a2 = self._config["a2"]
+        self.a3 = self._config["a3"]
+        self.a4 = self._config["a4"]
+        self.b1 = self._config["b1"]
         
-        self.lookback_window = config["lookback"]
+        self.lookback_window = self._config["lookback"]
         
         super().__init__(df=df, aum=aum, target_vol=target_vol)
  

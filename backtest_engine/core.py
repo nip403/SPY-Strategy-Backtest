@@ -6,7 +6,7 @@ import numpy as np
 from datetime import date
 from typing import Optional
 from .utils import round_date
-from .analysis import Tearsheet
+from .analysis import Tearsheet, PortfolioDecomposer
 
 class Portfolio:
     # per share frictions    
@@ -81,10 +81,8 @@ class Portfolio:
         return df.dropna()
     
     def _aggregate(self) -> pd.DataFrame:
-        dates = self.df.index.date
-
-        strat_equity = self.df["equity_curve"].groupby(dates).last()
-        bench_equity = self.df["benchmark"].groupby(dates).last()
+        strat_equity = self.df["equity_curve"].groupby(self.df.index.date).last()
+        bench_equity = self.df["benchmark"].groupby(self.df.index.date).last()
 
         # daily returns
         strat_ret = strat_equity.pct_change()
@@ -94,16 +92,16 @@ class Portfolio:
         bench_ret.iloc[0] = (bench_equity.iloc[0] / self.aum) - 1
 
         # drawdown
-        strat_peak = strat_equity.cummax()
-        strat_dd = (strat_equity - strat_peak) / strat_peak
+        strat_peak = np.maximum.accumulate(strat_equity.values)
+        strat_dd = pd.Series((strat_equity.values - strat_peak) / strat_peak, index=strat_equity.index)
 
-        bench_peak = bench_equity.cummax()
-        bench_dd = (bench_equity - bench_peak) / bench_peak
+        bench_peak = np.maximum.accumulate(bench_equity.values)
+        bench_dd = pd.Series((bench_equity.values - bench_peak) / bench_peak, index=bench_equity.index)
         
-        # trade count, assumes strategy always returns to 0 before oppening in the opposite direction
+        # trade count, only count entries and flips, and not position changes on the same side
         trade_count = (
-            ((self.df["position"] != 0) & (self.df["position"].shift(fill_value=0) == 0))
-            .groupby(dates).sum().astype(int)
+            ((self.df["position"] != 0) & (np.sign(self.df["position"]) != np.sign(self.df["position"].shift(fill_value=0))))
+            .groupby(self.df.index.date).sum().astype(int)
         )
 
         return pd.DataFrame({
@@ -120,7 +118,7 @@ class Portfolio:
     def sharpe(self) -> float:
         return float((r := self.stats["strat_ret"]).mean() / r.std() * 252**0.5)
     
-    def result(self, *, date: Optional[date] = None, start: Optional[date] = None, end: Optional[date] = None, plot: Optional[bool] = True) -> Tearsheet: 
+    def result(self, *, date: Optional[date] = None, start: Optional[date] = None, end: Optional[date] = None, plot: Optional[bool] = True, decompose: Optional[bool] = False) -> Tearsheet | PortfolioDecomposer: 
         """
         date: prioritised, displays noise area, trades, and stats for a given date
         start/end: ranges for displaying backtest results. default to max range
@@ -138,7 +136,7 @@ class Portfolio:
         strategy = sliced["strat_equity"]
         bench = sliced["bench_equity"]
 
-        if plot:
+        if plot and not decompose:
             plt.figure(figsize=(14, 8))
 
             plt.plot(strategy.index, strategy.values, color="blue", label="Strategy")
@@ -161,7 +159,7 @@ class Portfolio:
         sliced = self.stats[start:end].copy()
         sliced[["strat_equity", "bench_equity"]] *= self.aum / sliced[["strat_equity", "bench_equity"]].iloc[0].values
         
-        return Tearsheet().generate(sliced, plot_returns=plot)
+        return Tearsheet().generate(sliced, plot_returns=plot) if not decompose else PortfolioDecomposer(self).generate(start, end, plot=True)
         
     def _daily_result(self, dt: date, plot: bool) -> Tearsheet:
         plot_df = self.df.loc[str(dt)] # date string slicing
@@ -223,4 +221,5 @@ class Portfolio:
         
         return t
         
-        
+    def __str__(self) -> str:
+        return f"{__class__.__name__}(AUM: {self.aum}, Sharpe: {self.sharpe}, Period: [{self.t0} - {self.t1}])"

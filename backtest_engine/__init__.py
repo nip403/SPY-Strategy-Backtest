@@ -10,12 +10,11 @@ from .analysis import sharpe_curve, Tearsheet, PortfolioDecomposer
 __all__ = [
     request, 
     Tearsheet,
+    PortfolioDecomposer,
     
     Portfolio, 
     PortfolioRollingImmediateStop, 
     PortfolioRollingIntervalStop, 
     PortfolioQuarterHourSample,
     PortfolioDynamicCost,
-    
-    PortfolioDecomposer,
 ]
