@@ -118,8 +118,8 @@ class Tearsheet:
     def _plot_returns(self, ret: pd.DataFrame) -> None:
         fig, ax = plt.subplots(figsize=(12, 8)) 
         
-        ax.hist(ret["strat_ret"], bins=51, color="blue", alpha=0.45, label="Strategy", edgecolor="darkblue", density=True)
-        ax.hist(ret["bench_ret"], bins=51, color="orange", alpha=0.45, label="Benchmark", edgecolor="darkorange", density=True)
+        ax.hist(ret["strat_ret"], bins=51, color="blue", alpha=0.45, label="Strategy", edgecolor="none", density=True)
+        ax.hist(ret["bench_ret"], bins=51, color="orange", alpha=0.45, label="Benchmark", edgecolor="none", density=True)
         
         ax.set_title("Daily Returns Distribution", fontsize=12, fontweight="bold")
         ax.set_xlabel("Daily Return", fontsize=10)

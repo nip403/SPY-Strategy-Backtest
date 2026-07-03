@@ -96,109 +96,109 @@ class PortfolioDecomposer:
         return self
     
     def _plot_decomposition(self, ret: pd.DataFrame) -> None:
-            fig_size = (14, 10)
+        # equity curve
+        fig, ax = plt.subplots(figsize=(14, 10))
+        
+        colours = {
+            "Strategy": "#1f77b4", 
+            "Long-Only": "#2ca02c", 
+            "Short-Only": "#d62728", 
+            "Benchmark": "#ff7f0e"
+        }
+        
+        for col in ret.columns:
+            equity_curve = (1 + ret[col]).cumprod() * self.aum
+            ax.plot(equity_curve.index, equity_curve.values, label=col, color=colours[col], linewidth=1)
             
-            fig, ax = plt.subplots(figsize=fig_size)
+        ax.set_title("Portfolio Decomposition Equity Curves", fontsize=12, fontweight="bold")
+        ax.set_xlabel("Date", fontsize=10)
+        ax.set_ylabel("Portfolio Value ($)", fontsize=10)
+        ax.legend(loc="upper left", frameon=False)
+        
+        ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"${x:,.0f}"))
+        ax.set_xlim(ret.index.min(), ret.index.max())
+        ax.margins(x=0)
+        
+        plt.tight_layout()
+        plt.show()
+        
+        # Histogram
+        fig = plt.figure(figsize=(14, 10))
+        
+        gs = fig.add_gridspec(2, 2, top=0.91, bottom=0.07, left=0.07, right=0.93, wspace=0.20, hspace=0.20)
+        
+        fig.suptitle("Daily Returns Distributions vs Benchmark (SymLog-Scaled)", fontsize=14, fontweight="bold", y=0.96)
+        
+        hist_configs = [
+            {"label": "Strategy vs Benchmark", "series_col": "Strategy", "pos": gs[0, 0]},
+            {"label": "Long-Only vs Benchmark", "series_col": "Long-Only", "pos": gs[0, 1]},
+            {"label": "Short-Only vs Benchmark", "series_col": "Short-Only", "pos": gs[1, 0]}
+        ]
+        
+        for config in hist_configs:
+            ax_sub = fig.add_subplot(config["pos"])
             
-            colours = {
-                "Strategy": "#1f77b4", 
-                "Long-Only": "#2ca02c", 
-                "Short-Only": "#d62728", 
-                "Benchmark": "#ff7f0e"
-            }
+            xlim = max(ret[config["series_col"]].abs().std(), ret["Benchmark"].abs().std()) * 4.5
             
-            for col in ret.columns:
-                equity_curve = (1 + ret[col]).cumprod() * self.aum
-                ax.plot(equity_curve.index, equity_curve.values, label=col, color=colours[col], linewidth=1)
-                
-            ax.set_title("Portfolio Decomposition Equity Curves", fontsize=12, fontweight="bold")
-            ax.set_xlabel("Date", fontsize=10)
-            ax.set_ylabel("Portfolio Value ($)", fontsize=10)
-            ax.legend(loc="upper left", frameon=False)
+            ax_sub.hist(ret[config["series_col"]].values, bins=np.linspace(-xlim, xlim, 51), color=colours[config["series_col"]], alpha=0.4, histtype="stepfilled", density=True, align="mid", label=config["series_col"])
+            ax_sub.hist(ret["Benchmark"].values, bins=np.linspace(-xlim, xlim, 51), color=colours["Benchmark"], alpha=0.25, histtype="stepfilled", density=True, align="mid", label="Benchmark")
             
-            ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"${x:,.0f}"))
-            ax.set_xlim(ret.index.min(), ret.index.max())
-            ax.margins(x=0)
-            
-            plt.tight_layout()
-            plt.show()
-            
-            fig = plt.figure(figsize=fig_size)
-            gs = fig.add_gridspec(2, 2, top=0.91, bottom=0.07, left=0.07, right=0.93, wspace=0.20, hspace=0.20)
-            
-            fig.suptitle("Daily Returns Distributions vs Benchmark (SymLog-Scaled)", fontsize=14, fontweight="bold", y=0.96)
-            
-            hist_configs = [
-                {"label": "Strategy vs Benchmark", "series_col": "Strategy", "pos": gs[0, 0]},
-                {"label": "Long-Only vs Benchmark", "series_col": "Long-Only", "pos": gs[0, 1]},
-                {"label": "Short-Only vs Benchmark", "series_col": "Short-Only", "pos": gs[1, 0]}
-            ]
-            
-            for config in hist_configs:
-                ax_sub = fig.add_subplot(config["pos"])
-                s_col = config["series_col"]
-                
-                s_data = ret[s_col]
-                b_data = ret["Benchmark"]
-                
-                xlim = max(s_data.abs().std(), b_data.abs().std()) * 4.5
-                bins_edges = np.linspace(-xlim, xlim, 51)
-                
-                ax_sub.hist(s_data.values, bins=bins_edges, color=colours[s_col], alpha=0.4, histtype="stepfilled", density=True, align="mid", label=s_col)
-                ax_sub.hist(b_data.values, bins=bins_edges, color=colours["Benchmark"], alpha=0.25, histtype="stepfilled", density=True, align="mid", label="Benchmark")
-                
-                peak_s = np.histogram(s_data.values, bins=bins_edges, density=True)[0].max()
-                peak_b = np.histogram(b_data.values, bins=bins_edges, density=True)[0].max()
-                thresh = max(max(peak_s, peak_b) * 0.1, 1e-5)
-                ax_sub.set_yscale("symlog", linthresh=thresh)
-                
-                ax_sub.set_title(config["label"], fontsize=11, fontweight="bold")
-                ax_sub.set_xlim(-xlim, xlim)
-                ax_sub.margins(x=0)
-                ax_sub.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"{x*100:.1f}%"))
-                ax_sub.legend(loc="upper left", frameon=False, fontsize=9)
-                
-                stats_text = (
-                    f"[{s_col}]\n"
-                    f"Mean: {s_data.mean()*100:.3f}%\n"
-                    f"Std:  {s_data.std()*100:.2f}%\n"
-                    f"Skew: {s_data.skew():.2f}\n"
-                    f"Kurt: {s_data.kurt():.2f}\n\n"
-                    f"[Benchmark]\n"
-                    f"Mean: {b_data.mean()*100:.3f}%\n"
-                    f"Std:  {b_data.std()*100:.2f}%\n"
-                    f"Skew: {b_data.skew():.2f}\n"
-                    f"Kurt: {b_data.kurt():.2f}"
+            ax_sub.set_yscale(
+                "symlog", 
+                linthresh=max(
+                    max(
+                        np.histogram(ret[config["series_col"]].values, bins=np.linspace(-xlim, xlim, 51), density=True)[0].max(), 
+                        np.histogram(ret["Benchmark"].values, bins=np.linspace(-xlim, xlim, 51), density=True)[0].max()
+                    ) * 0.1, 
+                    1e-5,
                 )
-                ax_sub.text(
-                    0.96, 0.96, stats_text, 
-                    transform=ax_sub.transAxes, 
-                    fontsize=8, 
-                    fontfamily="monospace",
-                    horizontalalignment="right", 
-                    verticalalignment="top",
-                    bbox=dict(boxstyle="round,pad=0.4", facecolor="white", alpha=0.85, edgecolor="lightgray")
-                )
-                
-            ax_kde = fig.add_subplot(gs[1, 1])
+            )
             
-            global_xlim = ret["Strategy"].abs().std() * 4.5
-            xs = np.linspace(-global_xlim, global_xlim, 500)
+            ax_sub.set_title(config["label"], fontsize=11, fontweight="bold")
+            ax_sub.set_xlim(-xlim, xlim)
+            ax_sub.margins(x=0)
+            ax_sub.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"{x*100:.1f}%"))
+            ax_sub.legend(loc="upper left", frameon=False, fontsize=9)
             
-            for col in ret.columns:
-                kde = gaussian_kde(ret[col].values)
-                ys = kde(xs)
-                ax_kde.plot(xs, ys, label=col, color=colours[col], linewidth=1)
-                
-            ax_kde.set_title("Overlayed (Continuous, Gaussian KDE)", fontsize=11, fontweight="bold")
-            ax_kde.set_xlabel("Daily Return", fontsize=10)
-            ax_kde.set_ylabel("Probability Density", fontsize=10)
-            ax_kde.set_xlim(-global_xlim, global_xlim)
-            ax_kde.margins(x=0)
-            ax_kde.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"{x*100:.1f}%"))
-            ax_kde.legend(loc="upper right", frameon=False, fontsize=9)
+            stats_text = (
+                f"[{config["series_col"]}]\n"
+                f"Mean: {ret[config["series_col"]].mean()*100:.3f}%\n"
+                f"Std:  {ret[config["series_col"]].std()*100:.2f}%\n"
+                f"Skew: {ret[config["series_col"]].skew():.2f}\n"
+                f"Kurt: {ret[config["series_col"]].kurt():.2f}\n\n"
+                f"[Benchmark]\n"
+                f"Mean: {ret["Benchmark"].mean()*100:.3f}%\n"
+                f"Std:  {ret["Benchmark"].std()*100:.2f}%\n"
+                f"Skew: {ret["Benchmark"].skew():.2f}\n"
+                f"Kurt: {ret["Benchmark"].kurt():.2f}"
+            )
+            ax_sub.text(
+                0.96, 0.96, stats_text, 
+                transform=ax_sub.transAxes, 
+                fontsize=8, 
+                fontfamily="monospace",
+                horizontalalignment="right", 
+                verticalalignment="top",
+                bbox=dict(boxstyle="round,pad=0.4", facecolor="white", alpha=0.85, edgecolor="lightgray")
+            )
             
-            plt.show()
+        ax_kde = fig.add_subplot(gs[1, 1])
+        global_xlim = ret["Strategy"].abs().std() * 4.5
+        
+        for col in ret.columns:
+            kde = gaussian_kde(ret[col].values)
+            ys = kde(np.linspace(-global_xlim, global_xlim, 500))
+            ax_kde.plot(np.linspace(-global_xlim, global_xlim, 500), ys, label=col, color=colours[col], linewidth=1)
+            
+        ax_kde.set_title("Overlayed (Continuous, Gaussian KDE)", fontsize=11, fontweight="bold")
+        ax_kde.set_xlabel("Daily Return", fontsize=10)
+        ax_kde.set_ylabel("Probability Density", fontsize=10)
+        ax_kde.set_xlim(-global_xlim, global_xlim)
+        ax_kde.margins(x=0)
+        ax_kde.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"{x*100:.1f}%"))
+        ax_kde.legend(loc="upper right", frameon=False, fontsize=9)
+        
+        plt.show()
         
     def __str__(self) -> str:
         try:
