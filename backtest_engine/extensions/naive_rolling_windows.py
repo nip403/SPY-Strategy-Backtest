@@ -9,9 +9,7 @@ class PortfolioRollingImmediateStop(Portfolio):
         
         super().__init__(df=df, aum=aum, target_vol=target_vol, long_permissions=long_permissions, short_permissions=short_permissions)
 
-    def _backtest(self, df: pd.DataFrame) -> pd.DataFrame:  
-        df = self._preprocess(df)
-
+    def _set_positions(self, df: pd.DataFrame) -> pd.DataFrame:  
         # entry signal (rolling confirmation)
         raw_long_entry = df["close"] > df["upper_bound"]
         raw_short_entry = df["close"] < df["lower_bound"]
@@ -33,14 +31,7 @@ class PortfolioRollingImmediateStop(Portfolio):
 
         df["position"] = df["position"].ffill().fillna(0) * (self.target_vol / df["std"]).clip(lower=-4, upper=4) 
         
-        df["gross_ret"] = df["position"].shift(1).fillna(0) * df["ret"]
-        df["net_ret"] = df["gross_ret"] - (df["position"].diff().abs().fillna(0) * self.frictions / df["close"])
-        df["cum_ret"] = (1 + df["net_ret"].fillna(0)).cumprod()
-        df["equity_curve"] = self.aum * df["cum_ret"]
-        
-        df["benchmark"] = (1 + df["ret"].fillna(0)).cumprod() * self.aum
-                
-        return df.dropna()
+        return df
     
 # isolate confirmation effect
 class PortfolioRollingIntervalStop(Portfolio):
@@ -49,9 +40,7 @@ class PortfolioRollingIntervalStop(Portfolio):
         
         super().__init__(df=df, aum=aum, target_vol=target_vol, long_permissions=long_permissions, short_permissions=short_permissions)
 
-    def _backtest(self, df: pd.DataFrame) -> pd.DataFrame:  
-        df = self._preprocess(df)
-        
+    def _set_positions(self, df: pd.DataFrame) -> pd.DataFrame:  
         # entry signal (rolling confirmation)
         raw_long_entry = df["close"] > df["upper_bound"]
         raw_short_entry = df["close"] < df["lower_bound"]
@@ -75,11 +64,4 @@ class PortfolioRollingIntervalStop(Portfolio):
 
         df["position"] = df["position"].ffill().fillna(0) * (self.target_vol / df["std"]).clip(lower=-4, upper=4) 
         
-        df["gross_ret"] = df["position"].shift(1).fillna(0) * df["ret"]
-        df["net_ret"] = df["gross_ret"] - (df["position"].diff().abs().fillna(0) * self.frictions / df["close"])
-        df["cum_ret"] = (1 + df["net_ret"].fillna(0)).cumprod()
-        df["equity_curve"] = self.aum * df["cum_ret"]
-        
-        df["benchmark"] = (1 + df["ret"].fillna(0)).cumprod() * self.aum
-                
-        return df.dropna()
+        return df

@@ -7,9 +7,7 @@ class PortfolioQuarterHourSample(Portfolio):
     def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, long_permissions: Optional[bool] = True, short_permissions: Optional[bool] = True) -> None:
         super().__init__(df=df, aum=aum, target_vol=target_vol, long_permissions=long_permissions, short_permissions=short_permissions)
         
-    def _backtest(self, df: pd.DataFrame) -> pd.DataFrame:      
-        df = self._preprocess(df)
-        
+    def _set_positions(self, df: pd.DataFrame) -> pd.DataFrame:      
         entry_intervals = df.index.minute.isin([0, 15, 30, 45])
         exit_intervals = df.index.minute.isin([0, 30])
         
@@ -28,12 +26,5 @@ class PortfolioQuarterHourSample(Portfolio):
         df.loc[short_entry, "position"] = -1
 
         df["position"] = df["position"].ffill().fillna(0) * (self.target_vol / df["std"]).clip(lower=-4, upper=4) 
-        
-        df["gross_ret"] = df["position"].shift(1).fillna(0) * df["ret"]
-        df["net_ret"] = df["gross_ret"] - (df["position"].diff().abs().fillna(0) * self.frictions / df["close"])
-        df["cum_ret"] = (1 + df["net_ret"].fillna(0)).cumprod()
-        df["equity_curve"] = self.aum * df["cum_ret"]
-        
-        df["benchmark"] = (1 + df["ret"].fillna(0)).cumprod() * self.aum
-                
-        return df.dropna()
+    
+        return df

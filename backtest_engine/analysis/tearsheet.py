@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import statsmodels.api as sm
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
@@ -12,9 +11,9 @@ class Tearsheet:
         "Cum. Return", "Ann. Return", "Avg. Daily Return", "Ret. Skew", "Ret. Kurtosis",
         "Max Gain", "Best Day", "Max Loss", "Worst Day", "Win Rate", "Daily Win Rate",
         "Average Trades / Day", "Average Return / Trade",# "Average PnL / Share",
-        "Alpha", "Beta", "Ann. Volatility", 
-        "Max Drawdown", "Max DD Days", "95% VaR", 
-        "Sharpe Ratio", "Sortino Ratio", "Calmar Ratio", "Information Ratio"
+        "Alpha", "Beta", "R-Squared", "Ann. Volatility", 
+        "Max Drawdown", "Max DD Days", "95% VaR", "Expected Shortfall",
+        "Sharpe Ratio", "Sortino Ratio", "Calmar Ratio", "Information Ratio",
     ]
     
     _ATTRS = {
@@ -35,10 +34,12 @@ class Tearsheet:
         #"pnl_per_share": "Average PnL / Share",
         "alpha": "Alpha",
         "beta": "Beta",
+        "r_squared": "R-Squared",
         "ann_vol": "Ann. Volatility",
         "max_drawdown": "Max Drawdown",
         "max_dd_days": "Max DD Days",
         "var_95pct": "95% VaR",
+        "cvar": "Expected Shortfall",
         "sharpe_ratio": "Sharpe Ratio",
         "sortino_ratio": "Sortino Ratio",
         "calmar_ratio": "Calmar Ratio",
@@ -56,7 +57,7 @@ class Tearsheet:
         
     def generate(self, df: pd.DataFrame, plot_returns: Optional[bool] = True) -> Tearsheet:
         """
-        df: aggregate 
+        df: portfolio.stats 
         """
         
         ret = df[["strat_ret", "bench_ret"]]
@@ -82,15 +83,16 @@ class Tearsheet:
         self.trades_per_day = [df["trade_count"].mean(), None]
         self.return_per_trade = [(self.cum_return[0] / df["trade_count"].sum()), None]
         
-        # OLS, risk free not used
-        model = sm.OLS(df["strat_ret"], sm.add_constant(df["bench_ret"])).fit()
-        self.alpha = [model.params["const"] * 252, None]
-        self.beta = [model.params["bench_ret"], None]
+        beta = ret["strat_ret"].cov(ret["bench_ret"]) / ret["bench_ret"].var()
+        self.alpha = [(ret["strat_ret"].mean() - (beta * ret["bench_ret"].mean())) * 252, None]
+        self.beta = [beta, None]
+        self.r_squared = [ret["strat_ret"].corr(ret["bench_ret"]) ** 2, None] # how much strat volatility is explained by the market/how dependent it is on bench
         
         self.ann_vol = (ret.std().values) * np.sqrt(252)
         
         self.max_drawdown = dd.min().values
         self.var_95pct = np.percentile(ret, 5, axis=0)
+        self.cvar = np.where(np.any(ret <= self.var_95pct, axis=0), np.nanmean(np.where(ret["strat_ret"] <= self.var_95pct, ret["strat_ret"], np.nan), axis=0), np.nan)
         
         underwater = dd < 0
         state_changes = (underwater != underwater.shift()).cumsum()

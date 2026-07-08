@@ -2,8 +2,7 @@ import pandas as pd
 import numpy as np
 from typing import Optional
 from ..core import Portfolio
- 
-# I-Star impact model - https://www.kissellresearch.com/post/i-star-market-impact-model
+
 class PortfolioDynamicCost(Portfolio):
     DEFAULT_PARAMS = {
         "a1": 700, # outdated by over a decade
@@ -26,48 +25,71 @@ class PortfolioDynamicCost(Portfolio):
         self.lookback_window = self._config["lookback"]
         
         super().__init__(df=df, aum=aum, target_vol=target_vol, long_permissions=long_permissions, short_permissions=short_permissions)
- 
-    def _backtest(self, df: pd.DataFrame) -> pd.DataFrame:
-        df = self._preprocess(df)
- 
-        # signal generation
-        intervals = df.index.minute.isin([0, 30])
-        long_entry = (df["close"] > df["upper_bound"]) & intervals & self.long_perm
-        short_entry = (df["close"] < df["lower_bound"]) & intervals & self.short_perm
- 
-        long_exit = (df["close"] < df["long_stop"]) & intervals
-        short_exit = (df["close"] > df["short_stop"]) & intervals
- 
-        end_of_day = df.index.time == pd.Timestamp("15:59").time()
- 
-        df["position"] = np.nan
- 
-        df.loc[long_exit | short_exit | end_of_day, "position"] = 0
-        df.loc[long_entry, "position"] = 1
-        df.loc[short_entry, "position"] = -1
- 
-        df["position"] = df["position"].ffill().fillna(0) * (self.target_vol / df["std"]).clip(lower=-4, upper=4)
- 
-        df["gross_ret"] = df["position"].shift(1).fillna(0) * df["ret"]
-        
-        # rolling average daily volume & ann. volatility 
+    
+        self._cache = self._cache.loc[self.df.index]
+    
+    def _costing(self, df: pd.DataFrame) -> pd.Series:
         dates = pd.Series(df.index.date, index=df.index)
         buckets = df.groupby(df.index.date)
-        adv = buckets["volume"].sum().rolling(self.lookback_window).mean().shift(1)
-        ann_vol = buckets["close"].last().pct_change().rolling(self.lookback_window).std().shift(1) * 252 ** 0.5
+        
+        # I* market impact model
+        # build cache for net returns tensor, factor out aum for vectorised calcs in returns_matrix
+        # isolate aum from i* and mi and cache for aum multiplication later 
+        delta_leverage = df["position"].diff().abs().fillna(0).to_numpy()
+        close = df["close"].to_numpy()
+        volume = df["volume"].to_numpy()
+        
+        adv = dates.map(buckets["volume"].sum().rolling(self.lookback_window).mean().shift(1)).fillna(0).to_numpy()
+        ann_vol = dates.map(buckets["close"].last().pct_change().rolling(self.lookback_window).std().shift(1) * np.sqrt(252)).fillna(0).to_numpy()
 
-        # I-star market impact
-        delta_leverage = df["position"].diff().abs().fillna(0)
-        shares = delta_leverage * self.aum / df["close"]
-        participation_rate = shares / df["volume"]
+        # common factors, failsafe set div by volume=0 scenarios to 0
+        denom_adv = close * adv
+        adv_term = np.divide(delta_leverage, denom_adv, out=np.zeros_like(delta_leverage), where=(denom_adv != 0))
         
-        i_star = self.a1 * (shares / dates.map(adv)).fillna(0) ** self.a2 * dates.map(ann_vol).fillna(0) ** self.a3 # impact of trade (bps of trade value) on stock
+        denom_vol = close * volume
+        participation = np.divide(delta_leverage, denom_vol, out=np.zeros_like(delta_leverage), where=(denom_vol != 0))
         
-        df["mkt_impact"] = (self.b1 * i_star * participation_rate ** self.a4 + (1 - self.b1) * i_star) / 10_000 * delta_leverage # impact cost expected, scaled with leverage
+        perm = self.a1 * (adv_term ** self.a2) * (ann_vol ** self.a3) * delta_leverage
+        temp = perm * (participation ** self.a4)
         
-        df["net_ret"] = df["gross_ret"] - df["mkt_impact"] - self.COMMISSION * shares / self.aum
-        df["cum_ret"] = (1 + df["net_ret"].fillna(0)).cumprod()
-        df["equity_curve"] = self.aum * df["cum_ret"]
-        df["benchmark"] = (1 + df["ret"].fillna(0)).cumprod() * self.aum
- 
-        return df.dropna()
+        commission = np.divide(self.COMMISSION * delta_leverage, close, out=np.zeros_like(delta_leverage), where=(close != 0))
+        
+        gross = (df["position"].shift(1).fillna(0) * df["ret"].fillna(0)).to_numpy()
+        
+        self._cache = pd.DataFrame({
+            "gross": gross,
+            "perm": perm,
+            "temp": temp,
+            "commission": commission,
+        },
+        index=df.index
+        )
+        
+        # info
+        df["mkt_impact"] = np.nan_to_num((self.b1 * temp * (self.aum ** (self.a2 + self.a4)) + (1 - self.b1) * perm * (self.aum ** self.a2)) / 10_000, nan=0.0, posinf=0.0, neginf=0.0)
+
+        return pd.Series(self.returns_matrix(np.array([self.aum]))[:, 0], index=df.index)
+    
+    def returns_matrix(self, aum: np.ndarray) -> np.ndarray:
+        """
+        1. shares = (delta_leverage x AUM) / close
+        2. perm cost component = a1 x (shares / ADV)^a2 x vol^a3 
+            = [a1 x (delta_leverage / (close x ADV))^a2 x vol^a3] x AUM^a2
+            = baseline perm x AUM^a2
+        3. temp cost component = perm cost x (shares / volume)^a4
+            = [baseline perm x (delta_leverage / (close * volume))^a4] x AUM^(a2 + a4)
+            = baseline temp x AUM^(a2 + a4)
+        4. market impact cost = [b1 x baseline temp x AUM ^ (a2 + a4) + (1 - b1)] x [baseline perm x AUM^a2]
+        """
+        
+        gross = self._cache["gross"].to_numpy()[:, None]
+        perm = self._cache["perm"].to_numpy()[:, None]
+        temp = self._cache["temp"].to_numpy()[:, None]
+        commission = self._cache["commission"].to_numpy()[:, None]
+
+        aum = aum[None, :]
+        mkt = (self.b1 * temp * (aum ** (self.a2 + self.a4)) + (1 - self.b1) * perm * (aum ** self.a2)) / 10_000
+
+        # handle division failures upstream - potentially a bad choice
+        return np.nan_to_num(gross - mkt - commission, nan=0, posinf=0, neginf=0)
+        

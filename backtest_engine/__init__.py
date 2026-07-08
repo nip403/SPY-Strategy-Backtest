@@ -4,7 +4,6 @@ from .extensions.naive_rolling_windows import PortfolioRollingImmediateStop, Por
 from .extensions.naive_quarter_interval import PortfolioQuarterHourSample
 from .extensions.kissel_impact import PortfolioDynamicCost
 
-from .analysis.sharpe_curve import sharpe_curve
 from .analysis.tearsheet import Tearsheet
 from .analysis.decomposition import PortfolioDecomposer
 from .analysis.connector import StrategyConnector

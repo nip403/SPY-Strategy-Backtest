@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 from matplotlib import dates as mdates
@@ -52,9 +54,21 @@ class Portfolio:
         
     def _backtest(self, df: pd.DataFrame) -> pd.DataFrame:
         df = self._preprocess(df)
+        df = self._set_positions(df)
         
+        df["gross_ret"] = df["position"].shift(1).fillna(0) * df["ret"]
+        df["net_ret"] = self._costing(df)
+        
+        df["cum_ret"] = (1 + df["net_ret"].fillna(0)).cumprod()
+        df["equity_curve"] = self.aum * df["cum_ret"]
+        df["benchmark"] = (1 + df["ret"].fillna(0)).cumprod() * self.aum
+                
+        return df.dropna()
+    
+    def _set_positions(self, df: pd.DataFrame) -> pd.DataFrame:
         # signal generation
         intervals = df.index.minute.isin([0, 30])
+        
         long_entry = (df["close"] > df["upper_bound"]) & intervals & self.long_perm
         short_entry = (df["close"] < df["lower_bound"]) & intervals & self.short_perm
 
@@ -72,17 +86,50 @@ class Portfolio:
 
         df["position"] = df["position"].ffill().fillna(0) * (self.target_vol / df["std"]).clip(lower=-4, upper=4) 
         
-        df["gross_ret"] = df["position"].shift(1).fillna(0) * df["ret"]
-
+        return df
+    
+    def _costing(self, df: pd.DataFrame) -> pd.Series:
         # frictions: # net of costs: cost% = delta(position) * leverage / cost/share, incurred at the minute position changes
-        df["net_ret"] = df["gross_ret"] - (df["position"].diff().abs().fillna(0) * self.frictions / df["close"])
-        df["cum_ret"] = (1 + df["net_ret"].fillna(0)).cumprod()
-        df["equity_curve"] = self.aum * df["cum_ret"]
+        return df["gross_ret"] - (df["position"].diff().abs().fillna(0) * self.frictions / df["close"])
+    
+    def returns_matrix(self, aum: np.ndarray) -> np.ndarray: # trivial implementation for forward compatibility
+        return np.tile(self.df["net_ret"].to_numpy()[:, None], (1, len(aum)))
+    
+    @classmethod
+    def sharpe_curve(cls, df: pd.DataFrame, min_aum: Optional[int] = 1e4, max_aum: Optional[int] = 1e12 , base_aum: Optional[int] = None, **kwargs) -> None:
+        base_aum = min_aum if base_aum is None else np.clip(base_aum, min_aum, max_aum)
+        aum = np.logspace(np.log10(min_aum), np.log10(max_aum), num=int(np.log10(max_aum) - np.log10(min_aum)) * 9 + 1) # assumes 9 points per power of 10, even AUMs only when bounded by 1eX
+
+        if not np.any(np.isclose(aum, base_aum, rtol=1e-9)):
+            aum = np.sort(np.append(aum, base_aum))
+
+        instance = cls(df=df, aum=base_aum if base_aum is not None and min_aum <= base_aum <= max_aum else min_aum, **kwargs)
+        matrix = instance.returns_matrix(np.array(aum))
         
-        # visuals
-        df["benchmark"] = (1 + df["ret"].fillna(0)).cumprod() * self.aum
-                
-        return df.dropna()
+        means = np.nanmean(matrix, axis=0)
+        stds = np.nanstd(matrix, axis=0)
+        sharpes = np.where(stds != 0, (means / stds) * np.sqrt(252 * 390), 0) # annualise from minutes
+    
+        base_sharpe = sharpes[np.argmin(np.abs(aum - base_aum))]
+
+        fig, ax = plt.subplots(figsize=(12, 8))
+        
+        ax.plot(aum, sharpes, color="blue", label="Sharpe")
+        ax.axhline(base_sharpe, color="gray", linestyle="--", linewidth=1, label=f"Base Sharpe ({base_sharpe:.2f})")
+        ax.axhline(base_sharpe * 0.5, color="red", linestyle="--", linewidth=1, label=f"50% Base ({base_sharpe * 0.5:.2f})")
+        ax.axhline(0, color="black", linestyle="-", linewidth=1, label="Risk Free")
+
+        ax.set_xscale("log")
+        ax.set_xlim(min(aum), max(aum))
+        ax.set_xlabel("AUM ($)")
+        ax.set_ylabel("Sharpe Ratio")
+        ax.set_title(f"{cls.__name__} Capacity: Sharpe vs AUM", fontweight="bold")
+
+        ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"${x:,.0f}"))
+        ax.legend(frameon=False)
+        
+        plt.tight_layout()
+        plt.show()
     
     def _aggregate(self) -> pd.DataFrame:
         strat_equity = self.df["equity_curve"].groupby(self.df.index.date).last()
@@ -156,7 +203,7 @@ class Portfolio:
             ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
             ax.yaxis.set_major_formatter(ticker.StrMethodFormatter("${x:,.0f}"))
 
-            plt.legend()
+            plt.legend(frameon=False)
             plt.title(f"Strategy Performance ({start} - {end})", fontweight="bold")
             plt.show()
             
@@ -191,7 +238,7 @@ class Portfolio:
 
             ax1.set_title("Noise Area")
             ax1.set_ylabel("SPY", fontsize=12)
-            ax1.legend(loc="upper left")
+            ax1.legend(loc="upper left", frameon=False)
             ax1.margins(x=0) 
 
             ax2.step(
@@ -213,7 +260,6 @@ class Portfolio:
             ax2.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=plot_df.index.tz))
             ax2.set_xlim(ticks[0], ticks[-1])
 
-            plt.subplots_adjust(hspace=0)
             plt.suptitle(f"Strategy Performance ({dt})", fontweight="bold")
             plt.tight_layout()
             plt.show()
