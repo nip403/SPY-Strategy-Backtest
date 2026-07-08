@@ -17,6 +17,27 @@ class Portfolio:
     SLIPPAGE = 0.001
     
     def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, long_permissions: bool = True, short_permissions: bool = True) -> None:
+        """
+        Initialise and run a complete portfolio backtest. 
+        Strategy is modelled from "Beat the Market" paper, attached in repo.
+        
+        Runs preprocessing, signal generation, costing, and aggregation.
+        
+        Portfolio currently does not support capital withdrawals.
+
+        df : pd.DataFrame
+            1-minute intraday market data used for signal generation and execution.
+            Must contain required OHLCV fields and datetime index.
+        aum : float = 100_000
+            Initial portfolio value.
+        target_vol : float = 0.02
+            Target volatility used for position sizing, specified in the attached paper.
+        long_permissions : bool = True
+            Whether long trades are allowed.
+        short_permissions : bool = True
+            Whether short trades are allowed.
+        """
+        
         self.aum = aum
         self.target_vol = target_vol
         self.frictions = self.COMMISSION + self.SLIPPAGE
@@ -31,7 +52,19 @@ class Portfolio:
         
         self.stats = self._aggregate()
         
-    def _preprocess(self, df: pd.DataFrame) -> pd.DataFrame:      
+    def _preprocess(self, df: pd.DataFrame) -> pd.DataFrame:  
+        """
+        Prepare raw market data for backtesting.
+        
+        Calculates rolling statistics, returns, volatility, noise bands, and entry/exit thresholds used by the strategy.
+
+        df : pd.DataFrame
+            Raw intraday market data.
+
+        Returns pd.DataFrame
+            DataFrame containing original data and derived indicators.
+        """
+        
         # position sizing
         closes = df.groupby(df.index.date)["close"].last()
         returns = closes.pct_change()
@@ -53,6 +86,18 @@ class Portfolio:
         return df
         
     def _backtest(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Execute the complete backtest simulation.
+        
+        Applies preprocessing, generates positions, and costing to get net returns, and builds equity curves.
+
+        df : pd.DataFrame
+            Raw market data used for backtesting.
+
+        Returns pd.DataFrame
+            Dataframe with backtested strategy and intermediate logic.
+        """
+        
         df = self._preprocess(df)
         df = self._set_positions(df)
         
@@ -66,6 +111,19 @@ class Portfolio:
         return df.dropna(subset=["close", "volume", "ret", "position", "net_ret"])
     
     def _set_positions(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Generate strategy positions from trading signals. 
+        Main function to override to test variations/different strategies.
+
+        Creates entry and exit signals, and scales exposure according to volatility target.
+
+        df : pd.DataFrame
+            Preprocessed market data containing strategy indicators.
+
+        Returns pd.DataFrame
+            DataFrame containing generated portfolio positions.
+        """
+        
         # signal generation
         intervals = df.index.minute.isin([0, 30])
         
@@ -89,14 +147,50 @@ class Portfolio:
         return df
     
     def _costing(self, df: pd.DataFrame) -> pd.Series:
-        # frictions: # net of costs: cost% = delta(position) * leverage / cost/share, incurred at the minute position changes
+        """
+        Calculate transaction costs and net returns.
+        Applies commissions and slippage based on changes in portfolio exposure when positions are adjusted.
+
+        % Cost = delta(position) * leverage / cost/share, incurred at the minute position changes.
+
+        df : pd.DataFrame
+            Backtest data containing gross returns and positions.
+
+        Returns pd.Series
+            Net returns after transaction costs.
+        """
+    
         return df["gross_ret"] - (df["position"].diff().abs().fillna(0) * self.frictions / df["close"])
     
-    def returns_matrix(self, aum: np.ndarray) -> np.ndarray: # trivial implementation for forward compatibility
+    def returns_matrix(self, aum: np.ndarray) -> np.ndarray:
+        """
+        Generate returns across multiple portfolio sizes.
+        Provides a trivial interface for capacity analysis where returns can vary with AUM.
+
+        aum : np.ndarray
+            Portfolio capital values to evaluate.
+
+        Returns np.ndarray
+            Matrix of returns with one column per AUM value.
+        """
+        
         return np.tile(self.df["net_ret"].to_numpy()[:, None], (1, len(aum)))
     
     @classmethod
     def sharpe_curve(cls, df: pd.DataFrame, min_aum: int = 1e4, max_aum: int = 1e12 , base_aum: int = None, **kwargs) -> None:
+        """
+        Plot strategy Sharpe ratio across different portfolio capacities.
+
+        df : pd.DataFrame
+            Raw market data used to initialise a portfolio instance.
+        min_aum : int = 1e4 (10 k)
+            Minimum portfolio size evaluated.
+        max_aum : int = 1e12 (1 tr)
+            Maximum portfolio size evaluated.
+        base_aum : int = None
+            Reference portfolio size used for comparison.
+        """
+        
         base_aum = min_aum if base_aum is None else np.clip(base_aum, min_aum, max_aum)
         aum = np.logspace(np.log10(min_aum), np.log10(max_aum), num=int(np.log10(max_aum) - np.log10(min_aum)) * 9 + 1) # assumes 9 points per power of 10, even AUMs only when bounded by 1eX
 
@@ -126,12 +220,19 @@ class Portfolio:
         ax.set_title(f"{cls.__name__} Capacity: Sharpe vs AUM", fontweight="bold")
 
         ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"${x:,.0f}"))
-        ax.legend(frameon=False)
+        ax.legend()
         
         plt.tight_layout()
         plt.show()
     
     def _aggregate(self) -> pd.DataFrame:
+        """
+        Aggregate intraday results into daily performance statistics for internal reporting.
+
+        Returns pd.DataFrame
+            Daily strategy and benchmark statistics.
+        """
+        
         strat_equity = self.df["equity_curve"].groupby(self.df.index.date).last()
         bench_equity = self.df["benchmark"].groupby(self.df.index.date).last()
 
@@ -167,16 +268,43 @@ class Portfolio:
         
     @property
     def sharpe(self) -> float:
+        """
+        Calculate the annualised strategy Sharpe ratio.
+        Uses aggregated daily strategy returns without using a risk-free rate.
+
+        Returns float
+            Annualised Sharpe ratio.
+        """
+        
         return float((r := self.stats["strat_ret"]).mean() / r.std() * 252**0.5)
     
-    def result(self, *, date: Optional[date] = None, start: Optional[date] = None, end: Optional[date] = None, plot: bool = True, decompose: bool = False) -> Tearsheet | PortfolioDecomposer: 
+    def result(self, *, day: Optional[date] = None, start: Optional[date] = None, end: Optional[date] = None, plot: bool = True, decompose: bool = False) -> Tearsheet | PortfolioDecomposer: 
+        """
+        Generate a portfolio performance report.
+        Supports analysis for a single-day slice, period performance, and optional portfolio decomposition into long/short.
+
+        day : date = None
+            Single trading day to analyse, prioritised over provided start/end.
+        start : date = None
+            Start date for period analysis. Defaults to max range and defers to day if provided.
+        end : date = None
+            End date for period analysis. Defaults to max range and defers to day if provided.
+        plot : bool = True
+            Whether to display performance charts.
+        decompose : bool = False
+            Whether to return portfolio decomposition analysis instead of a Tearsheet.
+
+        Returns Tearsheet | PortfolioDecomposer
+            Performance report or decomposition object.
+        """
+        
         """
         date: prioritised, displays noise area, trades, and stats for a given date
         start/end: ranges for displaying backtest results. default to max range
         """
         
-        if date is not None:
-            return self._daily_result(round_date(self.df.index, date), plot=plot)
+        if day is not None:
+            return self._daily_result(round_date(self.df.index, day), plot=plot)
             
         start = round_date(self.df.index, start) if start is not None else self.t0
         end = round_date(self.df.index, end) if end is not None else self.t1
@@ -203,7 +331,7 @@ class Portfolio:
             ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
             ax.yaxis.set_major_formatter(ticker.StrMethodFormatter("${x:,.0f}"))
 
-            plt.legend(frameon=False)
+            plt.legend()
             plt.title(f"Strategy Performance ({start} - {end})", fontweight="bold")
             plt.show()
             
@@ -213,6 +341,18 @@ class Portfolio:
         return Tearsheet().generate(sliced, plot_returns=plot) if not decompose else PortfolioDecomposer(self).generate(start, end, plot=True)
         
     def _daily_result(self, dt: date, plot: bool) -> Tearsheet:
+        """
+        Internal method to generate an intraday analysis for a single trading day.
+
+        dt : date
+            Trading date to analyse.
+        plot : bool
+            Whether to display intraday charts.
+
+        Returns Tearsheet
+            Daily performance summary.
+        """
+    
         plot_df = self.df.loc[str(dt)] # date string slicing
 
         if plot:
@@ -238,7 +378,7 @@ class Portfolio:
 
             ax1.set_title("Noise Area")
             ax1.set_ylabel("SPY", fontsize=12)
-            ax1.legend(loc="upper left", frameon=False)
+            ax1.legend(loc="upper left")
             ax1.margins(x=0) 
 
             ax2.step(
@@ -272,4 +412,12 @@ class Portfolio:
         return t
         
     def __str__(self) -> str:
+        """
+        Return a short portfolio summary.
+        Includes portfolio size, Sharpe ratio, and backtest period.
+
+        Returns str
+            Formatted portfolio description.
+        """
+        
         return f"{__class__.__name__}(AUM: {self.aum}, Sharpe: {self.sharpe}, Period: [{self.t0} - {self.t1}])"

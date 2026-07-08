@@ -6,12 +6,18 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import pandas as pd
 import numpy as np
-from typing import Optional
 from datetime import date
 from .tearsheet import Tearsheet
     
 class PortfolioDecomposer:
     def __init__(self, portfolio: Portfolio) -> None:
+        """
+        Initialise portfolio backtest decomposition into long/short components.
+
+        portfolio : Portfolio
+            Backtested portfolio instance to decompose.
+        """
+        
         self.portfolio = portfolio
         
         self.aum = self.portfolio.aum
@@ -21,6 +27,22 @@ class PortfolioDecomposer:
         self.decomposition = None
         
     def generate(self, start_date: date, end_date: date, plot: bool = True) -> PortfolioDecomposer:
+        """
+        Performs the long/short decomposition.
+
+        Transaction costs are assigned proportionally, and tearsheets and generated for each component.
+
+        start_date : date
+            Start date of target backtest period.
+        end_date : date
+            End date of target backtest period.
+        plot : bool = True
+            Whether to display decomposition plots.
+
+        Returns PortfolioDecomposer
+            Populated decomposer containing component tearsheets and results.
+        """
+        
         df = self.df.loc[str(start_date): str(end_date)]
 
         # long/short split
@@ -96,6 +118,17 @@ class PortfolioDecomposer:
         return self
     
     def _plot_decomposition(self, ret: pd.DataFrame) -> None:
+        """
+        Plot portfolio component performance distributions.
+        Displays cumulative equity curves and returns histograms.
+
+        The KDE plot converts each return histogram into a smooth density curve.
+        This allows multiple distributions to be compared on a single chart without too much visual clutter.
+
+        ret : pd.DataFrame
+            Daily return series for strategy components and benchmark.
+        """
+        
         # equity curve
         fig, ax = plt.subplots(figsize=(14, 10))
         
@@ -113,7 +146,7 @@ class PortfolioDecomposer:
         ax.set_title("Portfolio Decomposition Equity Curves", fontsize=12, fontweight="bold")
         ax.set_xlabel("Date", fontsize=10)
         ax.set_ylabel("Portfolio Value ($)", fontsize=10)
-        ax.legend(loc="upper left", frameon=False)
+        ax.legend(loc="upper left")
         
         ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"${x:,.0f}"))
         ax.set_xlim(ret.index.min(), ret.index.max())
@@ -158,7 +191,7 @@ class PortfolioDecomposer:
             ax_sub.set_xlim(-xlim, xlim)
             ax_sub.margins(x=0)
             ax_sub.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"{x*100:.1f}%"))
-            ax_sub.legend(loc="upper left", frameon=False, fontsize=9)
+            ax_sub.legend(loc="upper left", fontsize=9)
             
             stats_text = (
                 f"[{config["series_col"]}]\n"
@@ -196,11 +229,19 @@ class PortfolioDecomposer:
         ax_kde.set_xlim(-global_xlim, global_xlim)
         ax_kde.margins(x=0)
         ax_kde.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"{x*100:.1f}%"))
-        ax_kde.legend(loc="upper right", frameon=False, fontsize=9)
+        ax_kde.legend(loc="upper right", fontsize=9)
         
         plt.show()
         
     def __str__(self) -> str:
+        """
+        Format decomposition tearsheets as a comparison table.
+        Displays strategy, long-only, short-only, and benchmark metrics in a consolidated report format.
+
+        Returns str
+            Formatted decomposition performance report.
+        """
+        
         try:
             ts_strat, ts_long, ts_short = self.component_tearsheets
         

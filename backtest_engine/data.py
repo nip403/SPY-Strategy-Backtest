@@ -6,6 +6,26 @@ from datetime import datetime
 import os
 
 def request(*, ticker: str = "SPY", config: dict, start: datetime = datetime(2017, 1, 1), end: datetime = datetime(2026, 6, 20), use_cache: bool = True) -> pd.DataFrame:
+    """
+    Request and lightly preprocess intraday market data from the Alpaca API.
+
+    Loads cached data when available or fetches minute bars from Alpaca before applying preprocessing and saving the result locally.
+
+    ticker : str = "SPY"
+        Equity symbol to request. Could be expanded to support multiple tickers in future.
+    config : dict
+        API credentials required for Alpaca access. Attrs {"key", "secret"}.
+    start : datetime = datetime(2017, 1, 1)
+        Start timestamp for requested market data.
+    end : datetime = datetime(2026, 6, 20)
+        End timestamp for requested market data.
+    use_cache : bool = True
+        Whether to use locally cached data when available.
+
+    Returns pd.DataFrame
+        Preprocessed intraday market data.
+    """
+    
     cache_filename = f"cache_{ticker}_{start.strftime('%Y%m%d')}_{end.strftime('%Y%m%d')}.parquet"
     
     if use_cache and os.path.exists(cache_filename):
@@ -36,7 +56,16 @@ def request(*, ticker: str = "SPY", config: dict, start: datetime = datetime(201
 
 def _preprocess(alpaca_df: pd.DataFrame) -> pd.DataFrame:
     """
-    US equity intraday minute data
+    Convert raw Alpaca bars into strategy-ready intraday market data.
+    Hardcoded compatibility with US equities.
+
+    Converts timestamps, filters regular US equity trading hours, calculates VWAP, daily open prices, and previous close values.
+
+    alpaca_df : pd.DataFrame
+        Raw minute bar data returned by Alpaca.
+
+    Returns pd.DataFrame
+        Cleaned intraday OHLCV data with derived market fields.
     """
     
     df = alpaca_df.tz_convert("America/New_York", level="timestamp").droplevel("symbol")

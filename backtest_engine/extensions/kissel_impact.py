@@ -5,15 +5,50 @@ from ..core import Portfolio
 
 class PortfolioDynamicCost(Portfolio):
     DEFAULT_PARAMS = {
-        "a1": 700, # outdated by over a decade
+        "a1": 700,
         "a2": 0.5,
         "a3": 1.0,
         "a4": 0.5,
-        "b1": 0.85, # llm consensus
+        "b1": 0.85,
         "lookback": 20, # 1 trading mth
     }
     
-    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, coeff_config: Optional[dict] = None, long_permissions: Optional[bool] = True, short_permissions: Optional[bool] = True) -> None:
+    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, coeff_config: Optional[dict] = None, long_permissions: bool = True, short_permissions: bool = True) -> None:
+        """
+        Initialise and run a backtest with a built-in Kissel I-Star Market Impact Model.
+
+        df : pd.DataFrame
+            1-minute intraday market data used for signal generation and execution.
+            Must contain required OHLCV fields and datetime index.
+        aum : float = 100_000
+            Initial portfolio value.
+        target_vol : float = 0.02
+            Target volatility used for position sizing.
+        coeff_config : Optional[dict] = None
+            Custom I* model coefficients overriding defaults. Coefficients are proprietary and not publicly available.
+            a1 : float = 700
+                Base market impact coefficient controlling overall cost magnitude. 
+                Default value is outdated by over a decade.
+            a2 : float = 0.5
+                Trade size exponent applied to ADV participation.
+                Square-root scaling of market impact is well-documented in empirical literature.
+            a3 : float = 1.0
+                Volatility exponent applied to market impact scaling.
+                Controls sensitivity to changes in market volatility.
+            a4 : float = 0.5
+                Temporary impact exponent applied to volume participation.
+                Controls the additional cost from trading volume concentration.
+            b1 : float = 0.85
+                Market-dependent weight between temporary and permanent market impact components.
+                Higher values increase sensitivity to temporary impact. Default value is by LLM consensus
+            lookback : int = 20
+                Number of trading days used to estimate average daily volume and volatility inputs.
+        long_permissions : bool = True
+            Whether long trades are allowed.
+        short_permissions : bool = True
+            Whether short trades are allowed.
+        """
+        
         self._config = {**self.DEFAULT_PARAMS, **(coeff_config or {})}
         
         self.a1 = self._config["a1"]
@@ -29,6 +64,16 @@ class PortfolioDynamicCost(Portfolio):
         self._cache = self._cache.loc[self.df.index]
     
     def _costing(self, df: pd.DataFrame) -> pd.Series:
+        """
+        Calculate returns after applying dynamic transaction costs.
+
+        df : pd.DataFrame
+            Backtest dataframe containing positions, prices, volume, and returns.
+
+        Returns pd.Series
+            Net returns after market impact and commission costs.
+        """
+    
         dates = pd.Series(df.index.date, index=df.index)
         buckets = df.groupby(df.index.date)
         
@@ -72,14 +117,26 @@ class PortfolioDynamicCost(Portfolio):
     
     def returns_matrix(self, aum: np.ndarray) -> np.ndarray:
         """
-        1. shares = (delta_leverage x AUM) / close
-        2. perm cost component = a1 x (shares / ADV)^a2 x vol^a3 
-            = [a1 x (delta_leverage / (close x ADV))^a2 x vol^a3] x AUM^a2
-            = baseline perm x AUM^a2
-        3. temp cost component = perm cost x (shares / volume)^a4
-            = [baseline perm x (delta_leverage / (close * volume))^a4] x AUM^(a2 + a4)
-            = baseline temp x AUM^(a2 + a4)
-        4. market impact cost = [b1 x baseline temp x AUM ^ (a2 + a4) + (1 - b1)] x [baseline perm x AUM^a2]
+        Generate net return scenarios across different portfolio sizes.
+        
+        Derivation calculations:
+            1. Shares = (Delta Leverage x AUM) / Close
+
+            2. Permanent Cost Component = a1 x (Shares / ADV)^a2 x Volatility^a3
+                = [a1 x (Delta Leverage / (Close x ADV))^a2 x Volatility^a3] x AUM^a2
+                = Baseline Permanent Cost x AUM^a2
+
+            3. Temporary Cost Component = Permanent Cost x (Shares / Volume)^a4
+                = [Baseline Permanent Cost x (Delta Leverage / (Close x Volume))^a4] x AUM^(a2 + a4)
+                = Baseline Temporary Cost x AUM^(a2 + a4)
+
+            4. Market Impact Cost = [b1 x Baseline Temporary Cost x AUM^(a2 + a4)] + [(1 - b1) x Baseline Permanent Cost x AUM^a2]
+
+        aum : np.ndarray
+            Array of AUM values used to scale market impact costs.
+
+        Returns np.ndarray
+            Matrix of net returns with rows matching timestamps and columns matching AUM values.
         """
         
         gross = self._cache["gross"].to_numpy()[:, None]

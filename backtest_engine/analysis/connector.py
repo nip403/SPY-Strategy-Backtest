@@ -3,14 +3,35 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+import warnings
 
 np.random.seed(42) # for Monte Carlo
 
+warnings.filterwarnings("ignore", category=FutureWarning)
+
 class StrategyConnector:
     def __init__(self, strategy_portfolio: Portfolio, book_equity: pd.Series, benchmark_equity: pd.Series, rebalance_period: int = 20) -> None:
+        """
+        Initialise portfolio integration analysis between an existing strategy and a master trading book.
+        Combines strategy returns with an existing portfolio, evaluates naive and optimised allocations, and generates key metrics.
+
+        Only evaluates the period intersected by strategy-book-benchmark indices.
+
+        strategy_portfolio : Portfolio
+            Strategy portfolio to integrate into the existing book.
+        book_equity : pd.Series
+            Minute-indexed existing book equity curve to be compared with strategy.
+            Forward-filling daily equity should only affect intraday statistics produced in the report. 
+        benchmark_equity : pd.Series
+            Minute-indexed benchmark equity curve aligned with the book and strategy periods.
+            No validation, but must span datetimes that cover the full strategy/book period.
+        rebalance_period : int = 20
+            Number of trading days between portfolio weight resets.
+        """
+        
         self.portfolio = strategy_portfolio
-        self.book = book_equity # minute index, equity series, overall portfolio to incorporate strategy into
-        self.bench = benchmark_equity # minute index, make sure spanned datetimes cover full book/strat period
+        self.book = book_equity 
+        self.bench = benchmark_equity 
         self.rebalance_period = rebalance_period
         
         # returns comparison df
@@ -33,18 +54,36 @@ class StrategyConnector:
         self.daily["combined"] = self._mix_returns(np.array([self._naive_w]), self.daily["strat"].values[:, None]) # naive mix: target weight = initial starting capital proportions
         self._opt_w, self.daily["optimised"] = self._optimise_weight()
         
-        self.metrics_df = pd.DataFrame(columns=self.daily.columns)
+        self.metrics_df = pd.DataFrame(columns=self.daily.columns, dtype=object)
         
         self._generate_report()
         
-    def _optimise_weight(self, depth: int = 3, points: int = 11) -> tuple[float, pd.Series]: # iterative 1d grid search
+    def _optimise_weight(self, depth: int = 3, points: int = 11) -> tuple[float, pd.Series]:
+        """
+        Optimise strategy allocation weight by Sharpe ratio using an iterative 1D grid search.
+        Searches over strategy weights and selects the allocation producing the highest annualised Sharpe ratio.
+        Avoids excessive capital scaling near full allocation.
+        
+        Assumes trading book capital remains constant while adjusting weights for the strategy.
+
+        depth : int = 3
+            Number of refinement rounds performed around the best weight.
+            Increases the search precision by one decimal place when using points = 11.
+        points : int = 11
+            Number of candidate weights tested per refinement round.
+            Default points = 11 tests weights in 10% increments (0.0, 0.1, ..., 1.0) before refining the interval.
+
+        Returns tuple[float, pd.Series]
+            Optimised strategy weight and resulting mixed portfolio daily returns.
+        """
         lo, hi = 0, 1
         
         for _ in range(depth):
             weights = np.linspace(lo, hi, points)
             
             # w = aum / (aum + book). if weight = 1, book equity drops out, fallback to baseline strategy AUM
-            aums = np.where(weights == 1, self.portfolio.aum, weights * self.book.loc[self.df.index[0]] / (1 - weights))
+            aums = weights * self.book.loc[self.df.index[0]] / np.where(weights == 1, np.inf, 1 - weights)
+            aums[weights == 1] = self.portfolio.aum
             
             daily = (pd.DataFrame(
                 1 + self.portfolio.returns_matrix(aums), 
@@ -69,6 +108,20 @@ class StrategyConnector:
         return best_weight, pd.Series(mixed[:, best_idx], index=self.daily.index)
     
     def _mix_returns(self, weights: np.ndarray, strat_daily_matrix: np.ndarray) -> np.ndarray:
+        """
+        Combine strategy and book returns according to provided weights, accounting for periodic rebalancing.
+        
+        Calculates portfolio returns from changing strategy allocations between rebalance points.
+
+        weights : np.ndarray
+            Strategy allocation weights for each return scenario.
+        strat_daily_matrix : np.ndarray
+            Matrix of strategy daily returns across allocation scenarios.
+
+        Returns np.ndarray
+            Matrix of mixed portfolio daily returns.
+        """
+    
         n, k = strat_daily_matrix.shape
         book_daily = self.daily["book"].values[:, None] # reshape to broadcast
 
@@ -93,6 +146,10 @@ class StrategyConnector:
         return r 
     
     def _generate_report(self) -> None:
+        """
+        Generate portfolio integration and risk metrics.
+        """
+    
         s = self.daily[["strat", "combined", "optimised"]]
         b = self.daily["book"]
 
@@ -166,6 +223,15 @@ class StrategyConnector:
         self.metrics_df.loc["Strategy AUM", ["combined", "optimised"]] = [self.book.loc[self.df.index[0]] * (self._naive_w / (1 - self._naive_w)), self.book.loc[self.df.index[0]] * (self._opt_w / (1 - self._opt_w))]
 
     def result(self, plot: bool = True) -> None:
+        """
+        Display portfolio integration performance and risk analysis.
+
+        Plots cumulative equity, rolling Sharpe ratio, strategy correlation, and beta.
+
+        plot : bool = True
+            Whether to display performance charts before printing the report.
+        """
+    
         if plot:
             fig, axes = plt.subplots(
                 nrows=4, 
@@ -226,6 +292,13 @@ class StrategyConnector:
         print(self)
 
     def __str__(self) -> str:
+        """
+        Format integration and risk metrics into a readable report table.
+
+        Returns str
+            Formatted portfolio integration and risk report.
+        """
+    
         cols = {
             "book": "Book",
             "strat": "Strategy",
