@@ -3,7 +3,7 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
-from typing import Optional
+from typing import Any
 
 class Tearsheet:
     _METRICS = [
@@ -53,13 +53,28 @@ class Tearsheet:
     }
     
     def __init__(self) -> None:
+        """
+        Initialise an empty tearsheet for storing portfolio metrics.
+        Metrics are populated either through attribute assignment or via generate().
+        Used internally by Portfolio classes.
+        """
+        
         self._data = {metric: [] for metric in self._METRICS}
         
-    def generate(self, df: pd.DataFrame, plot_returns: Optional[bool] = True) -> Tearsheet:
+    def generate(self, df: pd.DataFrame, plot_returns: bool = True) -> Tearsheet:
         """
-        df: portfolio.stats 
+        Calculate performance and risk metrics from portfolio returns.
+
+        df : pd.DataFrame
+            Portfolio statistics containing strategy and benchmark returns,
+            drawdowns, and trade counts.
+        plot_returns : bool = True
+            Whether to display the daily return distribution plot.
+
+        Returns Tearsheet
+            Populated tearsheet containing calculated metrics.
         """
-        
+
         ret = df[["strat_ret", "bench_ret"]]
         dd = df[["strat_dd", "bench_dd"]]
         days = len(df.index)
@@ -92,7 +107,7 @@ class Tearsheet:
         
         self.max_drawdown = dd.min().values
         self.var_95pct = np.percentile(ret, 5, axis=0)
-        self.cvar = np.where(np.any(ret <= self.var_95pct, axis=0), np.nanmean(np.where(ret["strat_ret"] <= self.var_95pct, ret["strat_ret"], np.nan), axis=0), np.nan)
+        self.cvar = np.array([np.nanmean(np.where(ret.iloc[:, i] <= self.var_95pct[i], ret.iloc[:, i], np.nan))for i in range(ret.shape[1])])
         
         underwater = dd < 0
         state_changes = (underwater != underwater.shift()).cumsum()
@@ -118,6 +133,13 @@ class Tearsheet:
         return self
     
     def _plot_returns(self, ret: pd.DataFrame) -> None:
+        """
+        Plot daily return distributions for strategy and benchmark.
+
+        ret : pd.DataFrame
+            DataFrame containing strategy and benchmark return series.
+        """
+    
         fig, ax = plt.subplots(figsize=(12, 8)) 
         
         ax.hist(ret["strat_ret"], bins=51, color="blue", alpha=0.45, label="Strategy", edgecolor="none", density=True)
@@ -126,7 +148,7 @@ class Tearsheet:
         ax.set_title("Daily Returns Distribution", fontsize=12, fontweight="bold")
         ax.set_xlabel("Daily Return", fontsize=10)
         ax.set_ylabel("Probability Density", fontsize=10)
-        ax.legend(loc="upper left", frameon=False)
+        ax.legend(loc="upper left")
         xlim = max(ret["strat_ret"].abs().max(), ret["bench_ret"].abs().max()) * 1.05
         ax.set_xlim(-xlim, xlim)
 
@@ -159,6 +181,18 @@ class Tearsheet:
         plt.show()
 
     def __getattr__(self, name: str):
+        """
+        Retrieve stored metrics through dynamic attribute access.
+        Supports direct metric access through attribute aliases defined in _ATTRS, and prefixed access for strategy and benchmark metrics.
+
+        name : str
+            Metric attribute name or strategy/benchmark prefixed metric name.
+
+        Returns
+            Stored metric value
+            Strategy and benchmark prefixes return the respective column value.
+        """
+    
         if name in self._ATTRS:
             return self._data[self._ATTRS[name]]
 
@@ -178,9 +212,21 @@ class Tearsheet:
                 
                 return self._data[metric][1] if len(self._data[metric]) > 1 else None
 
-        raise AttributeError(f"'Tearsheet' object has no attribute '{name}'")
+        raise AttributeError(f"\"Tearsheet\" object has no attribute \"{name}\"")
 
-    def __setattr__(self, name: str, value):
+    def __setattr__(self, name: str, value: Any | list[Any]):
+        """
+        Stores dynamically mapped tearsheet metrics.
+
+        Metrics are stored internally in _data using display names from _ATTRS. 
+        Supports assigning values directly or through strategy and benchmark prefixes.
+
+        name : str
+            Attribute name to assign.
+        value : Any
+            Metric value to store. Arrays and lists are converted into the internal metric representation.
+        """
+        
         if name in ["_METRICS", "_ATTRS", "_data"]:
             super().__setattr__(name, value)
             return
@@ -223,7 +269,19 @@ class Tearsheet:
         else:
             super().__setattr__(name, value)
 
-    def _format_val(self, metric: str, val) -> str:
+    def _format_val(self, metric: str, val: Any) -> str:
+        """
+        Format metric values for tearsheet display, used internally by __str__.
+
+        metric : str
+            Metric name used to determine formatting rules.
+        val: Any
+            Metric value to format.
+
+        Returns str
+            Formatted metric value.
+        """
+    
         if val is None or (isinstance(val, float) and np.isnan(val)):
             return "-"
 
@@ -240,6 +298,13 @@ class Tearsheet:
         return str(val)
 
     def __str__(self) -> str:
+        """
+        Return a formatted text summary of portfolio performance metrics.
+
+        Returns str
+            Human-readable tearsheet report.
+        """
+    
         if all(len(v) == 0 for v in self._data.values()):
             return "Empty Tearsheet."
 
