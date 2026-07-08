@@ -35,7 +35,7 @@ def round_date(date_index: pd.DataFrame, dt: date) -> date:
     
     return before if (dt - before) <= (after - dt) else after
 
-def generate_toy_returns(periods: int, *, mean: float = 0, std: float = 1, distribution: Optional[Callable] = None) -> np.ndarray:
+def generate_toy_returns(periods: int, *, mean: float = 0, std: float = 1, distribution: Optional[Callable] = None, random_seed: Optional[int] = 42) -> np.ndarray:
     """
     Generate synthetic returns from a specified distribution.
 
@@ -47,16 +47,35 @@ def generate_toy_returns(periods: int, *, mean: float = 0, std: float = 1, distr
         Target minute standard deviation.
     distribution : Callable = None
         Random distribution function that accepts loc, scale, and size arguments, and returns an np.ndarray.
+        Ideally an existing np distribution function or wrapper for compatibility with random_seed.
         Defaults to numpy normal distribution.
+    random_seed : int = 42
+        Random seed used for reproducible results. Set to None for non-deterministic output.
 
     Returns np.ndarray
         Array of simulated returns.
     """
     
-    return (distribution or np.random.normal)(loc=mean, scale=std, size=periods)
+    state = np.random.get_state()
+
+    try:
+        match random_seed:
+            case int() | np.integer():
+                np.random.seed(random_seed)
+            case _: # handle none and invalid seeds
+                np.random.seed(42)
+
+        return (distribution or np.random.normal)(
+            loc=mean,
+            scale=std,
+            size=periods,
+        )
+
+    finally: # reset initial state
+        np.random.set_state(state)
 
 # annual exp ret and vol needed, assumes minute-intraday frequency
-def generate_toy_equity(portfolio: Portfolio, *, expected_return: float = 0, volatility: float = 0.01, distribution: Optional[Callable] = None) -> pd.Series:
+def generate_toy_equity(portfolio: Portfolio, *, expected_return: float = 0, volatility: float = 0.01, distribution: Optional[Callable] = None, random_seed: Optional[int] = 42) -> pd.Series:
     """
     Generate a synthetic intraday equity curve based on desired annual statistics.
 
@@ -69,6 +88,8 @@ def generate_toy_equity(portfolio: Portfolio, *, expected_return: float = 0, vol
     distribution : Callable = None
         Random distribution function that accepts loc, scale, and size arguments, and returns an np.ndarray.
         Defaults to numpy normal distribution.
+    seed : int = 42
+        Random seed used for reproducible results. Set to None for non-deterministic output.
 
     Returns pd.Series
         Synthetic equity curve aligned to the portfolio intraday index.
@@ -79,6 +100,7 @@ def generate_toy_equity(portfolio: Portfolio, *, expected_return: float = 0, vol
         mean = expected_return / (252 * 390), 
         std = volatility / np.sqrt(252 * 390), 
         distribution=distribution,
+        random_seed=random_seed,
     )
 
     return pd.Series((1 + returns).cumprod() * portfolio.aum, index=portfolio.df.index, name="equity")
