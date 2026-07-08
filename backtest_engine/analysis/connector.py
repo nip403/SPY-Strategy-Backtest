@@ -165,14 +165,14 @@ class StrategyConnector:
         self.metrics_df.loc["Strategy Weight", ["combined", "optimised"]] = [self._naive_w, self._opt_w]
         self.metrics_df.loc["Strategy AUM", ["combined", "optimised"]] = [self.book.loc[self.df.index[0]] * (self._naive_w / (1 - self._naive_w)), self.book.loc[self.df.index[0]] * (self._opt_w / (1 - self._opt_w))]
 
-    def report(self, plot: bool = True) -> None:
+    def result(self, plot: bool = True) -> None:
         if plot:
             fig, axes = plt.subplots(
                 nrows=4, 
                 ncols=1, 
-                figsize=(14, 18), 
+                figsize=(14, 12), 
                 sharex=True, 
-                gridspec_kw={"height_ratios": [3, 2, 1.5, 1.5]}
+                gridspec_kw={"height_ratios": [3, 1, 1, 1]}
             )
             
             # cumulative equity
@@ -184,36 +184,36 @@ class StrategyConnector:
                 
             axes[0].set_title("Cumulative Portfolio Equity", loc="left", fontweight="bold")
             axes[0].set_ylabel("Growth Factor")
-            axes[0].legend(loc="upper left", frameon=False)
+            axes[0].legend(loc="upper left")
 
-            # rolling monthly sharpe
-            sharpe = (self.daily.rolling(21).mean() / self.daily.rolling(21).std()) * np.sqrt(252)
+            # rolling semi-annual sharpe
+            sharpe = (self.daily.rolling(126).mean() / self.daily.rolling(126).std()) * np.sqrt(252)
             
-            for col, name in cols.items():
-                axes[1].plot(sharpe.index, sharpe[col], label=name, linewidth=1, linestyle="--" if col == "bench" else "-")
+            for col in ["optimised", "book"]:
+                axes[1].plot(sharpe.index, sharpe[col], label=cols[col], linewidth=1)
                 
-            axes[1].set_title("Rolling Monthly Sharpe", loc="left", fontweight="bold")
+            axes[1].set_title("Rolling Semi-Annual Sharpe", loc="left", fontweight="bold")
             axes[1].set_ylabel("Annualized Sharpe")
             axes[1].legend(loc="upper left")
 
-            # rolling monthly correlation strat vs book
-            roll_corr = self.daily["strat"].rolling(21).corr(self.daily["book"])
+            # rolling semi-annual correlation strat vs book
+            roll_corr = self.daily["strat"].rolling(126).corr(self.daily["book"])
             
             axes[2].plot(roll_corr.index, roll_corr, linewidth=1)
             
             axes[2].axhline(0, color="black", linestyle="-", linewidth=1, alpha=0.5)
-            axes[2].set_title("Rolling Monthly Correlation (Strategy vs Book)", loc="left", fontweight="bold")
+            axes[2].set_title("Rolling Semi-Annual Correlation (Strategy vs Book)", loc="left", fontweight="bold")
             axes[2].set_ylabel("Correlation")
             
-            # rolling monthly beta
+            # rolling semi-annual beta
             for col in ["strat", "combined", "optimised"]:
-                roll_beta = self.daily[col].rolling(21).cov(self.daily["bench"]) / self.daily["bench"].rolling(21).var()
+                roll_beta = self.daily[col].rolling(126).cov(self.daily["bench"]) / self.daily["bench"].rolling(126).var()
                 axes[3].plot(roll_beta.index, roll_beta, label=f"Beta ({cols[col]} vs Bench)", linewidth=1)
             
             axes[3].axhline(0, color="black", linestyle="-", linewidth=1, alpha=0.5)
-            axes[3].set_title("Rolling Monthly Betas", loc="left", fontweight="bold")
+            axes[3].set_title("Rolling Semi-Annual Betas", loc="left", fontweight="bold")
             axes[3].set_ylabel("Beta")
-            axes[3].legend(loc="upper left", frameon=False)
+            axes[3].legend(loc="upper left")
 
             for ax in axes:
                 ax.label_outer()
