@@ -8,17 +8,20 @@ from .analysis.tearsheet import Tearsheet
 from .analysis.decomposition import PortfolioDecomposer
 from .analysis.connector import StrategyConnector
 
+from .utils import gen_toy_returns
+
 from .data import request
 
 __all__ = [
-    request, 
+    request,
+    gen_toy_returns,
     Tearsheet,
     PortfolioDecomposer,
     StrategyConnector,
     
-    Portfolio, 
-    PortfolioRollingImmediateStop, 
-    PortfolioRollingIntervalStop, 
+    Portfolio,
+    PortfolioRollingImmediateStop,
+    PortfolioRollingIntervalStop,
     PortfolioQuarterHourSample,
     PortfolioDynamicCost,
 ]

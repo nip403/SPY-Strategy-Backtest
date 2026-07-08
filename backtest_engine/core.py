@@ -16,7 +16,7 @@ class Portfolio:
     COMMISSION = 0.0035
     SLIPPAGE = 0.001
     
-    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, long_permissions: Optional[bool] = True, short_permissions: Optional[bool] = True) -> None:
+    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, long_permissions: bool = True, short_permissions: bool = True) -> None:
         self.aum = aum
         self.target_vol = target_vol
         self.frictions = self.COMMISSION + self.SLIPPAGE
@@ -63,7 +63,7 @@ class Portfolio:
         df["equity_curve"] = self.aum * df["cum_ret"]
         df["benchmark"] = (1 + df["ret"].fillna(0)).cumprod() * self.aum
                 
-        return df.dropna()
+        return df.dropna(subset=["close", "volume", "ret", "position", "net_ret"])
     
     def _set_positions(self, df: pd.DataFrame) -> pd.DataFrame:
         # signal generation
@@ -96,7 +96,7 @@ class Portfolio:
         return np.tile(self.df["net_ret"].to_numpy()[:, None], (1, len(aum)))
     
     @classmethod
-    def sharpe_curve(cls, df: pd.DataFrame, min_aum: Optional[int] = 1e4, max_aum: Optional[int] = 1e12 , base_aum: Optional[int] = None, **kwargs) -> None:
+    def sharpe_curve(cls, df: pd.DataFrame, min_aum: int = 1e4, max_aum: int = 1e12 , base_aum: int = None, **kwargs) -> None:
         base_aum = min_aum if base_aum is None else np.clip(base_aum, min_aum, max_aum)
         aum = np.logspace(np.log10(min_aum), np.log10(max_aum), num=int(np.log10(max_aum) - np.log10(min_aum)) * 9 + 1) # assumes 9 points per power of 10, even AUMs only when bounded by 1eX
 
@@ -169,7 +169,7 @@ class Portfolio:
     def sharpe(self) -> float:
         return float((r := self.stats["strat_ret"]).mean() / r.std() * 252**0.5)
     
-    def result(self, *, date: Optional[date] = None, start: Optional[date] = None, end: Optional[date] = None, plot: Optional[bool] = True, decompose: Optional[bool] = False) -> Tearsheet | PortfolioDecomposer: 
+    def result(self, *, date: Optional[date] = None, start: Optional[date] = None, end: Optional[date] = None, plot: bool = True, decompose: bool = False) -> Tearsheet | PortfolioDecomposer: 
         """
         date: prioritised, displays noise area, trades, and stats for a given date
         start/end: ranges for displaying backtest results. default to max range

@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
 import pandas as pd
 import numpy as np
-from typing import Optional
 
 np.random.seed(42) # for Monte Carlo
 
 class StrategyConnector:
-    def __init__(self, strategy_portfolio: Portfolio, book_equity: pd.Series, benchmark_equity: pd.Series, rebalance_period: Optional[int] = 20) -> None:
+    def __init__(self, strategy_portfolio: Portfolio, book_equity: pd.Series, benchmark_equity: pd.Series, rebalance_period: int = 20) -> None:
         self.portfolio = strategy_portfolio
         self.book = book_equity # minute index, equity series, overall portfolio to incorporate strategy into
         self.bench = benchmark_equity # minute index, make sure spanned datetimes cover full book/strat period
@@ -19,10 +17,10 @@ class StrategyConnector:
         self.df = (
             pd.concat([
                 self.portfolio.df["net_ret"], 
-                self.book.pct_change().fillna(0), 
-                self.bench.pct_change().fillna(0),
+                self.book.pct_change(), 
+                self.bench.pct_change(),
             ], axis=1, join="inner")
-            .dropna()
+            .fillna(0)
         )
         
         self.df.columns = ["strat", "book", "bench"]
@@ -167,7 +165,7 @@ class StrategyConnector:
         self.metrics_df.loc["Strategy Weight", ["combined", "optimised"]] = [self._naive_w, self._opt_w]
         self.metrics_df.loc["Strategy AUM", ["combined", "optimised"]] = [self.book.loc[self.df.index[0]] * (self._naive_w / (1 - self._naive_w)), self.book.loc[self.df.index[0]] * (self._opt_w / (1 - self._opt_w))]
 
-    def report(self, plot: Optional[bool] = True) -> None:
+    def report(self, plot: bool = True) -> None:
         if plot:
             fig, axes = plt.subplots(
                 nrows=4, 
@@ -228,4 +226,46 @@ class StrategyConnector:
         print(self)
 
     def __str__(self) -> str:
-        return f"=== Portfolio Integration & Risk Report ===\n{self.metrics_df.round(2).fillna('-').to_string()}"
+        cols = {
+            "book": "Book",
+            "strat": "Strategy",
+            "combined": "Combined",
+            "optimised": "Optimised",
+            "bench": "Bench",
+        }
+
+        df = self.metrics_df.copy().rename(columns=cols)[["Book", "Strategy", "Combined", "Optimised", "Bench"]]
+
+        pct_metrics = {
+            "Expected Return",
+            "Volatility",
+            "Max Drawdown",
+            "Alpha",
+            "Incremental Alpha",
+            "95% cVar (Historical)",
+            "95% cVar (Monte Carlo)",
+            "Strategy Weight",
+        }
+        
+        int_metrics = {
+            "Max DD Days",
+            "Max DD Recovery Days",
+        }
+        
+        def fmt(x, metric):
+            if pd.isna(x):
+                return "-"
+            
+            elif not isinstance(x, (int, float, np.number)):
+                return x
+            
+            elif metric in pct_metrics:
+                return f"{x:.2%}"
+            
+            elif metric in int_metrics:
+                return f"{int(x)}"
+            
+            else:
+                return f"{x:.2f}"
+
+        return f"=== Portfolio Integration & Risk Report ===\n{df.apply(lambda col: [fmt(x, m) for m, x in col.items()])}"
