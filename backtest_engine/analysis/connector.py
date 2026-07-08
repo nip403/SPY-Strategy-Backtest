@@ -152,11 +152,13 @@ class StrategyConnector:
     
         s = self.daily[["strat", "combined", "optimised"]]
         b = self.daily["book"]
+        
+        new_strats = ["combined", "optimised"]
 
         # return, exposure, distribution
         self.metrics_df.loc["Expected Return"] = self.daily.mean() * 252
         self.metrics_df.loc["Volatility"] = self.daily.std() * np.sqrt(252)
-        self.metrics_df.loc["Sharpe"] = np.where(self.daily.std() != 0, (self.daily.mean() / self.daily.std()) * np.sqrt(252), 0)
+        self.metrics_df.loc["Sharpe Ratio"] = np.where(self.daily.std() != 0, (self.daily.mean() / self.daily.std()) * np.sqrt(252), 0)
         self.metrics_df.loc["Beta"] = self.daily.cov().loc["bench"] / self.daily["bench"].var()
 
         self.metrics_df.loc["Skewness"] = self.daily.skew()
@@ -180,24 +182,26 @@ class StrategyConnector:
         # correlation
         self.metrics_df.loc["Correlation to Book", s.columns] = s.corrwith(b)
         self.metrics_df.loc["Crash Correlation to Book", s.columns] = s[b <= b.quantile(0.10)].corrwith(b[b <= b.quantile(0.10)])
-        self.metrics_df.loc["Intraday Correlation to Book", "strat"] = self.df["strat"].corr(self.df["book"])
+        self.metrics_df.loc["Intraday Correlation to Book", "strat"] = self.df[["strat", "book"]].groupby(self.df.index.date).corr().iloc[0::2, -1].mean() # average correlation intraday, probably not useful. very cursed slicing due to output of corr
 
         # alpha & incremental
         self.metrics_df.loc["Alpha"] = (self.daily.mean() - self.metrics_df.loc["Beta"] * self.daily["bench"].mean()) * 252
-        self.metrics_df.loc["Idiosyncratic Risk"] = self.daily.sub(self.metrics_df.loc["Beta"] * self.daily["bench"] + (self.metrics_df.loc["Alpha"] / 252), axis=0).std() * np.sqrt(252) # capm residual vs bench
+        self.metrics_df.loc["Idiosyncratic Risk"] = (self.daily - (self.daily["bench"].values[:, None] * self.metrics_df.loc["Beta"].values + self.metrics_df.loc["Alpha"].values / 252)).std() * np.sqrt(252) # capm residual vs bench
         
         b_beta = s.corrwith(b) * (s.std() / b.std())
-        self.metrics_df.loc["Incremental Alpha", s.columns] = (s.mean() - b_beta * b.mean()) * 252 # incremental edge vs existing
-        self.metrics_df.loc["Incremental Risk", s.columns] = s.sub(b_beta * b + (self.metrics_df.loc["Incremental Alpha", s.columns] / 252), axis=0).std() * np.sqrt(252)
+    
+        self.metrics_df.loc["Incremental Alpha", new_strats] = (s[new_strats].mean() - b_beta[new_strats] * b.mean()) * 252 # incremental edge vs book
+        self.metrics_df.loc["Incremental Risk", new_strats] = (s[new_strats] - (b.values[:, None] * b_beta[new_strats].values + self.metrics_df.loc["Incremental Alpha", new_strats].values / 252)).std() * np.sqrt(252)
         
-        self.metrics_df.loc["Incremental Sharpe Test", "combined"] = "Pass" if self.metrics_df.loc["Sharpe", "combined"] > self.metrics_df.loc["Sharpe", "book"] * self.metrics_df.loc["Correlation to Book", "strat"] else "Fail"
-
+        self.metrics_df.loc["Incremental Sharpe (Marginal)", "strat"] = self.metrics_df.loc["Sharpe Ratio", "strat"] - self.metrics_df.loc["Correlation to Book", "strat"] * self.metrics_df.loc["Sharpe Ratio", "book"] # sharpe heuristic: SRnew > SRold * corr
+        self.metrics_df.loc["Incremental Sharpe (Realised)", new_strats] = self.metrics_df.loc["Sharpe Ratio", new_strats] - self.metrics_df.loc["Sharpe Ratio", "book"]
+        
         # risk & robustness
         self.metrics_df.loc["Lower Tail Dependency", s.columns] = ((s <= s.quantile(0.10)).mul(b <= b.quantile(0.10), axis=0)).sum() / (b <= b.quantile(0.10)).sum()
         self.metrics_df.loc["Upper Tail Dependency", s.columns] = ((s >= s.quantile(0.90)).mul(b >= b.quantile(0.90), axis=0)).sum() / (b >= b.quantile(0.90)).sum()
 
         self.metrics_df.loc["95% cVar (Historical)"] = self.daily[self.daily <= self.daily.quantile(0.05)].mean()
-        self.metrics_df.loc["95% cVar (Monte Carlo)", s.columns] = np.sort(s.values[np.random.randint(0, len(self.daily), size=(10000, 252))], axis=1)[:, :12, :].mean(axis=(0, 1))
+        self.metrics_df.loc["95% cVar (Monte Carlo)"] = np.sort(self.daily.values[np.random.randint(0, len(self.daily), size=(10000, 252))], axis=1)[:, :12, :].mean(axis=(0, 1))
     
         # market capture
         for name, mask in {
@@ -219,8 +223,8 @@ class StrategyConnector:
         self.metrics_df.loc["Calmar Ratio"] = np.where(self.metrics_df.loc["Max Drawdown"] != 0, (self.daily.mean() * 252) / abs(self.metrics_df.loc["Max Drawdown"]), 0)
     
         # info/weights
-        self.metrics_df.loc["Strategy Weight", ["combined", "optimised"]] = [self._naive_w, self._opt_w]
-        self.metrics_df.loc["Strategy AUM", ["combined", "optimised"]] = [self.book.loc[self.df.index[0]] * (self._naive_w / (1 - self._naive_w)), self.book.loc[self.df.index[0]] * (self._opt_w / (1 - self._opt_w))]
+        self.metrics_df.loc["Strategy Weight", new_strats] = [self._naive_w, self._opt_w]
+        self.metrics_df.loc["Strategy AUM", new_strats] = [self.book.loc[self.df.index[0]] * (self._naive_w / (1 - self._naive_w)), self.book.loc[self.df.index[0]] * (self._opt_w / (1 - self._opt_w))]
 
     def result(self, plot: bool = True) -> None:
         """
@@ -315,6 +319,8 @@ class StrategyConnector:
             "Max Drawdown",
             "Alpha",
             "Incremental Alpha",
+            "Idiosyncratic Risk",
+            "Incremental Risk",
             "95% cVar (Historical)",
             "95% cVar (Monte Carlo)",
             "Strategy Weight",
