@@ -63,12 +63,11 @@ class PortfolioRollingImmediateStop(Portfolio):
         df["position"] = df["position"].ffill().fillna(0) * (self.target_vol / df["std"]).clip(lower=-4, upper=4) 
         
         return df
-    
-# isolate confirmation effect
+
 class PortfolioRollingIntervalStop(Portfolio):
     def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, entry_window: int = 30, long_permissions: bool = True, short_permissions: bool = True) -> None:
         """
-        Initialise a rolling confirmation strategy with interval stops.
+        Initialise a rolling confirmation strategy with interval stops to isolate the confirmation effect.
 
         Entry signals require the boundary condition to persist for the confirmation window, while exits are evaluated as according to the base strategy.
 
@@ -101,7 +100,7 @@ class PortfolioRollingIntervalStop(Portfolio):
 
         Returns pd.DataFrame
             DataFrame containing generated portfolio positions.
-        """ 
+        """
         
         # entry signal (rolling confirmation)
         raw_long_entry = df["close"] > df["upper_bound"]

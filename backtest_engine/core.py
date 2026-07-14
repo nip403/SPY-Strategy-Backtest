@@ -52,7 +52,7 @@ class Portfolio:
         
         self.stats = self._aggregate()
         
-    def _preprocess(self, df: pd.DataFrame) -> pd.DataFrame:  
+    def _preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Prepare raw market data for backtesting.
         
@@ -296,11 +296,6 @@ class Portfolio:
 
         Returns Tearsheet | PortfolioDecomposer
             Performance report or decomposition object.
-        """
-        
-        """
-        date: prioritised, displays noise area, trades, and stats for a given date
-        start/end: ranges for displaying backtest results. default to max range
         """
         
         if day is not None:

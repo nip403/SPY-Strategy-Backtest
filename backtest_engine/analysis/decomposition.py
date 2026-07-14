@@ -8,7 +8,7 @@ import pandas as pd
 import numpy as np
 from datetime import date
 from .tearsheet import Tearsheet
-    
+
 class PortfolioDecomposer:
     def __init__(self, portfolio: Portfolio) -> None:
         """

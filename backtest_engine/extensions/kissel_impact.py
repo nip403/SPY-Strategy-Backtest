@@ -79,7 +79,7 @@ class PortfolioDynamicCost(Portfolio):
         
         # I* market impact model
         # build cache for net returns tensor, factor out aum for vectorised calcs in returns_matrix
-        # isolate aum from i* and mi and cache for aum multiplication later 
+        # isolate aum from i* and mi and cache for aum multiplication later
         delta_leverage = df["position"].diff().abs().fillna(0).to_numpy()
         close = df["close"].to_numpy()
         volume = df["volume"].to_numpy()
@@ -149,4 +149,3 @@ class PortfolioDynamicCost(Portfolio):
 
         # handle division failures upstream - potentially a bad choice
         return np.nan_to_num(gross - mkt - commission, nan=0, posinf=0, neginf=0)
-        
