@@ -261,7 +261,7 @@ class StrategyConnector:
     
         # info/weights
         self.metrics_df.loc["Strategy Weight", new_strats] = [self._naive_w, self._opt_w]
-        self.metrics_df.loc["Strategy AUM", new_strats] = [self.aum if np.isclose(w, 1.0) else self.book.loc[self.df.index[0]] * (w / (1 - w)) for w in (self._naive_w, self._opt_w)]
+        self.metrics_df.loc["Strategy AUM", new_strats] = [self.portfolio.aum if np.isclose(w, 1.0) else self.book.loc[self.df.index[0]] * (w / (1 - w)) for w in (self._naive_w, self._opt_w)]
         
     def result(self, plot: bool = True) -> None:
         """
