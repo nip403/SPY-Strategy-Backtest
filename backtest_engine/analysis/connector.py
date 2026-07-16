@@ -37,8 +37,8 @@ class StrategyConnector:
         # returns comparison df
         self.df = (
             pd.concat([
-                self.portfolio.df["net_ret"], 
-                self.book.pct_change(), 
+                self.portfolio.df["net_ret"],
+                self.book.pct_change(),
                 self.bench.pct_change(),
             ], axis=1, join="inner")
             .fillna(0)
@@ -261,8 +261,8 @@ class StrategyConnector:
     
         # info/weights
         self.metrics_df.loc["Strategy Weight", new_strats] = [self._naive_w, self._opt_w]
-        self.metrics_df.loc["Strategy AUM", new_strats] = [self.book.loc[self.df.index[0]] * (self._naive_w / (1 - self._naive_w)), self.book.loc[self.df.index[0]] * (self._opt_w / (1 - self._opt_w))]
-
+        self.metrics_df.loc["Strategy AUM", new_strats] = [self.aum if np.isclose(w, 1.0) else self.book.loc[self.df.index[0]] * (w / (1 - w)) for w in (self._naive_w, self._opt_w)]
+        
     def result(self, plot: bool = True) -> None:
         """
         Display portfolio integration performance and risk analysis.
