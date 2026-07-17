@@ -44,12 +44,14 @@ class StrategyConnector:
             .fillna(0)
         )
         
+        self.initial_book_cap = self.book.loc[self.df.index[0]]
+        
         self.df.columns = ["strat", "book", "bench"]
         self.daily = (1 + self.df).groupby(self.df.index.date).prod() - 1
         
         # create bundled portfolios - assumes regular rebalancing to given weight every self.rebalance_period days
         # NOTE: weights are BACKWARDS looking, set to base off book/strategy starting equity
-        self._naive_w = self.portfolio.aum / (self.book.loc[self.df.index[0]] + self.portfolio.aum)
+        self._naive_w = 0.5
         self.daily["combined"] = self._mix_returns(np.array([self._naive_w]), self._get_exact_returns(self._naive_w))[:, 0] # naive mix: target weight = initial starting capital proportions
         
         self._opt_w, self.daily["optimised"] = self._optimise_weight()
@@ -62,7 +64,6 @@ class StrategyConnector:
         """
         Optimise strategy allocation weight by Sharpe ratio using an iterative 1D grid search.
         Searches over strategy weights and selects the allocation producing the highest annualised Sharpe ratio.
-        Avoids excessive capital scaling near full allocation.
         
         Uses an AUM mean scaling approximation to project cost changes as strategy is rebalanced to avoid ridiculously high memory needs.
         
@@ -80,23 +81,24 @@ class StrategyConnector:
         """
         
         lo, hi = 0, 1
-
-        # book growth at each rebalance
-        book_growth = (1 + self.daily["book"]).cumprod().shift(1).fillna(1).values
-        block_growth = book_growth[np.arange(0, len(self.daily), self.rebalance_period)]
-
-        # rebalance block index for each day
-        block_idx = np.arange(len(self.daily)) // self.rebalance_period
-
+        
         for _ in range(depth):
             weights = np.linspace(lo, hi, points)
             
-            # w = aum / (aum + book). if weight = 1, book equity drops out, fallback to baseline strategy AUM
-            aums = weights * self.book.loc[self.df.index[0]] / np.where(weights == 1, np.inf, 1 - weights)
-            aums[weights == 1] = self.portfolio.aum
+            approx_mixed = self._mix_returns(weights, np.tile(self.daily["strat"].values[:, None], (1, points))) 
+            
+            # average portfolio growth factor
+            port_growth = np.cumprod(1 + approx_mixed, axis=0)
+            port_growth = np.vstack([np.ones((1, points)), port_growth[:-1, :]]) # use capital on previous day to rebalance
+            
+            block_growth = port_growth[np.arange(0, len(self.daily), self.rebalance_period), :]
+            mean_growth = block_growth.mean(axis=0)
+            
+            # scale by mean mixed growth per weight
+            aums = weights * self.initial_book_cap * mean_growth
             
             daily = (pd.DataFrame(
-                1 + self.portfolio.returns_matrix(aums * block_growth.mean()), 
+                1 + self.portfolio.returns_matrix(aums),
                 index=self.portfolio.df.index,
             ).groupby(self.portfolio.df.index.date).prod() - 1).loc[self.daily.index].values
             
@@ -107,10 +109,6 @@ class StrategyConnector:
             
             best_idx = np.argmax(sharpes)
             best_weight = weights[best_idx]
-            
-            if best_weight >= 0.9: # avoid blowing up strat aum since it scales hyperbolically with weight approaching 1
-                best_weight = 1
-                break
             
             span = (hi - lo) / (points - 1)
             lo = max(0, best_weight - span)
@@ -161,7 +159,7 @@ class StrategyConnector:
     def _get_exact_returns(self, weight: float) -> np.ndarray:
         """
         Calculates the exact cost-adjusted daily returns for a rebalanced strategy integration.
-        Recomputes strategy returns using exact AUM at each rebalance, scaling strategy capital with book growth to maintain the target weight.
+        Recomputes strategy returns using exact AUM at each rebalance, scaling strategy capital with true mixed portfolio growth to maintain the target weight.
 
         weight : float
             Target strategy allocation.
@@ -170,18 +168,22 @@ class StrategyConnector:
             Daily strategy return matrix of shape (n_days, 1).
         """
         
-        # book growth at each rebalance
-        book_growth = (1 + self.daily["book"]).cumprod().shift(1).fillna(1).values
-        block_growth = book_growth[np.arange(0, len(self.daily), self.rebalance_period)]
+        approx_mixed = self._mix_returns(np.array([weight]), self.daily["strat"].values[:, None])[:, 0]
+        
+        # portfolio & book growth at the start of each rebalance period
+        port_growth = pd.Series(approx_mixed).add(1).cumprod().shift(1).fillna(1).values
+        block_growth = port_growth[np.arange(0, len(self.daily), self.rebalance_period)]
         block_idx = np.arange(len(self.daily)) // self.rebalance_period
- 
+        
+        exact_aums = weight * self.initial_book_cap * block_growth
+        
         daily_mixed = (pd.DataFrame(
-            1 + self.portfolio.returns_matrix(block_growth * (self.portfolio.aum if np.isclose(weight, 1) else weight * self.book.loc[self.df.index[0]] / (1 - weight))), 
+            1 + self.portfolio.returns_matrix(exact_aums),
             index=self.portfolio.df.index,
         ).groupby(self.portfolio.df.index.date).prod() - 1).loc[self.daily.index].values
         
         return daily_mixed.reshape(len(self.daily), len(block_growth), 1)[np.arange(len(self.daily)), block_idx]
-    
+
     def _generate_report(self) -> None:
         """
         Generate portfolio integration and risk metrics.
@@ -191,6 +193,7 @@ class StrategyConnector:
         b = self.daily["book"]
         
         new_strats = ["combined", "optimised"]
+        non_bench = ["book", "strat"] + new_strats
 
         # return, exposure, distribution
         self.metrics_df.loc["Expected Return"] = self.daily.mean() * 252
@@ -261,7 +264,11 @@ class StrategyConnector:
     
         # info/weights
         self.metrics_df.loc["Strategy Weight", new_strats] = [self._naive_w, self._opt_w]
-        self.metrics_df.loc["Strategy AUM", new_strats] = [self.portfolio.aum if np.isclose(w, 1.0) else self.book.loc[self.df.index[0]] * (w / (1 - w)) for w in (self._naive_w, self._opt_w)]
+        self.metrics_df.loc["Total AUM (Initial)", non_bench] = [self.initial_book_cap, self.portfolio.aum, self.initial_book_cap, self.initial_book_cap]
+        self.metrics_df.loc["Total AUM (Final)", non_bench] = self.metrics_df.loc["Total AUM (Initial)"] * equity.iloc[-1]
+
+        self.metrics_df.loc["Strategy AUM (Initial)", new_strats] = [self._naive_w * self.initial_book_cap, self._opt_w * self.initial_book_cap]
+        self.metrics_df.loc["Strategy AUM (Final)", new_strats] = self.metrics_df.loc["Total AUM (Final)", new_strats] * np.array([self._naive_w, self._opt_w])
         
     def result(self, plot: bool = True) -> None:
         """
@@ -275,10 +282,10 @@ class StrategyConnector:
     
         if plot:
             fig, axes = plt.subplots(
-                nrows=4, 
-                ncols=1, 
-                figsize=(14, 12), 
-                sharex=True, 
+                nrows=4,
+                ncols=1,
+                figsize=(14, 12),
+                sharex=True,
                 gridspec_kw={"height_ratios": [3, 1, 1, 1]}
             )
             
@@ -384,4 +391,4 @@ class StrategyConnector:
             else:
                 return f"{x:.2f}"
 
-        return f"=== Portfolio Integration & Risk Report ===\n{df.apply(lambda col: [fmt(x, m) for m, x in col.items()])}"
+        return f"=== Portfolio Integration & Risk Report ===\n{df.apply(lambda col: [fmt(x, m) for m, x in col.items()]).to_string()}"
