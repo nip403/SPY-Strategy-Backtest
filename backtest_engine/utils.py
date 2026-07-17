@@ -221,7 +221,7 @@ def generate_toy_equity(
         Then, f(x) = ln(product) - ln(1 + R_toy) = 0, and root find.
         """
         
-        target = np.log1p(expected_return)
+        target = np.log1p(expected_return) * len(benchmark) / periods_per_year
         base = 1 + beta * benchmark[:, None]
         
         # start with arithmetic return approximation
