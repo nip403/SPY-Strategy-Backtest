@@ -148,7 +148,7 @@ def generate_toy_equity(
     **kwargs: dict
         Additional kw args to pass onto the distribution callable, if compatible. 
 
-    Returns pd.Series | pd.DataFrame, np.ndarray
+    Returns tuple[pd.Series | pd.DataFrame, np.ndarray]
         1. Synthetic equity curve aligned to the portfolio intraday index.
         2. 1d boolean np.ndarray mask to filter initial valid parameter sets
     """

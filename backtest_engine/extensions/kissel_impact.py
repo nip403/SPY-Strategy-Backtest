@@ -149,3 +149,41 @@ class PortfolioDynamicCost(Portfolio):
 
         # handle division failures upstream - potentially a bad choice
         return np.nan_to_num(gross - mkt - commission, nan=0, posinf=0, neginf=0)
+    
+    def debug_execution_costs(self) -> None:
+        """Print one-line I-Star diagnostics."""
+
+        delta = self.df["position"].diff().abs().fillna(0).to_numpy()
+        close = self.df["close"].to_numpy()
+        volume = self.df["volume"].to_numpy()
+
+        shares = delta * self.aum / close
+        participation = np.divide(
+            shares,
+            close * volume,
+            out=np.zeros_like(shares),
+            where=(close * volume) != 0,
+        )
+
+        impact = (
+            self.b1 * self._cache["temp"] * self.aum ** (self.a2 + self.a4)
+            + (1 - self.b1) * self._cache["perm"] * self.aum ** self.a2
+        ) / 10_000
+
+        q = [0.99, 1.0]
+
+        trade_value = delta * self.aum
+        trade_value = trade_value[trade_value > 0]
+
+        print(
+            f"AUM={self.aum:>10,.0f} | "
+            f"Turn={delta.sum():7.1f}x | "
+            f"Trade Mkt 99=${np.quantile(trade_value, 0.99):,.0f}"f"Trade99=${np.quantile(trade_value, 0.99):,.0f}"
+            f"Part99/Max={np.quantile(participation, q)} | "
+            f"Perm99/Max={np.quantile(self._cache['perm'], q)} | "
+            f"Temp99/Max={np.quantile(self._cache['temp'], q)} | "
+            f"Imp99/Max={np.quantile(impact, q)} | "
+            f"Gross={self._cache['gross'].sum():6.3f} | "
+            f"Imp={impact.sum():6.3f} | "
+            f"Comm={self._cache['commission'].sum():6.3f}"
+        )
