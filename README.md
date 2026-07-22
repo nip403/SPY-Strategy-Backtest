@@ -12,8 +12,8 @@ Comprehensive backtesting engine designed to test the intraday volatility-breako
 backtest_engine/
 ├── __init__.py
 ├── core.py                          Portfolio (base class)
-├── data.py                          Alpaca data fetch, caching, preprocessing
-├── utils.py                         Toy return/equity generators, date rounding
+├── data.py                          Alpaca API data fetch, caching, preprocessing
+├── utils.py                         Toy equity series generator, other helpers
 ├── extensions/
 │   ├── naive_rolling_windows.py     Core Portfolio example variants
 │   ├── naive_quarter_interval.py    Core Portfolio example variants

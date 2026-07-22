@@ -13,7 +13,7 @@ class PortfolioDynamicCost(Portfolio):
         "lookback": 20, # 1 trading mth
     }
     
-    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, coeff_config: Optional[dict] = None, long_permissions: bool = True, short_permissions: bool = True) -> None:
+    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, long_permissions: bool = True, short_permissions: bool = True, coeff_config: Optional[dict] = None,) -> None:
         """
         Initialise and run a backtest with a built-in Kissel I-Star Market Impact Model.
 
@@ -24,6 +24,10 @@ class PortfolioDynamicCost(Portfolio):
             Initial portfolio value.
         target_vol : float = 0.02
             Target volatility used for position sizing.
+        long_permissions : bool = True
+            Whether long trades are allowed.
+        short_permissions : bool = True
+            Whether short trades are allowed.
         coeff_config : Optional[dict] = None
             Custom I* model coefficients overriding defaults. Coefficients are proprietary and not publicly available.
             a1 : float = 700
@@ -43,10 +47,6 @@ class PortfolioDynamicCost(Portfolio):
                 Higher values increase sensitivity to temporary impact. Default value is by LLM consensus
             lookback : int = 20
                 Number of trading days used to estimate average daily volume and volatility inputs.
-        long_permissions : bool = True
-            Whether long trades are allowed.
-        short_permissions : bool = True
-            Whether short trades are allowed.
         """
         
         self._config = {**self.DEFAULT_PARAMS, **(coeff_config or {})}
