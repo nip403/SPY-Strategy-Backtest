@@ -18,7 +18,6 @@ backtest_engine/
 │   ├── naive_rolling_windows.py     Core Portfolio example variants
 │   ├── naive_quarter_interval.py    Core Portfolio example variants
 │   └── kissel_impact.py             Core Portfolio variant (Kissel I-Star impact model)
-
 └── analysis/
     ├── tearsheet.py                 Tearsheet
     ├── decomposition.py             Long/short strategy decomposer
