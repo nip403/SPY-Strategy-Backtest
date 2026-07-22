@@ -13,18 +13,18 @@ from .utils import generate_toy_returns, generate_toy_equity
 from .data import request
 
 __all__ = [
-    request,
-    
-    generate_toy_returns,
-    generate_toy_equity,
-    
-    Tearsheet,
-    PortfolioDecomposer,
-    StrategyConnector,
-    
-    Portfolio,
-    PortfolioRollingImmediateStop,
-    PortfolioRollingIntervalStop,
-    PortfolioQuarterHourSample,
-    PortfolioDynamicCost,
+    "request",
+
+    "generate_toy_returns",
+    "generate_toy_equity",
+
+    "Tearsheet",
+    "PortfolioDecomposer",
+    "StrategyConnector",
+
+    "Portfolio",
+    "PortfolioRollingImmediateStop",
+    "PortfolioRollingIntervalStop",
+    "PortfolioQuarterHourSample",
+    "PortfolioDynamicCost",
 ]

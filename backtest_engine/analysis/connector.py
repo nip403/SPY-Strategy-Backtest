@@ -270,7 +270,7 @@ class StrategyConnector:
         self.metrics_df.loc["Strategy AUM (Initial)", new_strats] = [self._naive_w * self.initial_book_cap, self._opt_w * self.initial_book_cap]
         self.metrics_df.loc["Strategy AUM (Final)", new_strats] = self.metrics_df.loc["Total AUM (Final)", new_strats] * np.array([self._naive_w, self._opt_w])
         
-    def result(self, plot: bool = True) -> None:
+    def report(self, plot: bool = True) -> None:
         """
         Display portfolio integration performance and risk analysis.
 

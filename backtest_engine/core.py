@@ -278,7 +278,7 @@ class Portfolio:
         
         return float((r := self.stats["strat_ret"]).mean() / r.std() * 252**0.5)
     
-    def result(self, *, day: Optional[date] = None, start: Optional[date] = None, end: Optional[date] = None, plot: bool = True, decompose: bool = False) -> Tearsheet | PortfolioDecomposer: 
+    def report(self, *, day: Optional[date] = None, start: Optional[date] = None, end: Optional[date] = None, plot: bool = True, decompose: bool = False) -> Tearsheet | PortfolioDecomposer: 
         """
         Generate a portfolio performance report.
         Supports analysis for a single-day slice, period performance, and optional portfolio decomposition into long/short.
@@ -333,7 +333,7 @@ class Portfolio:
         sliced = self.stats[start:end].copy()
         sliced[["strat_equity", "bench_equity"]] *= self.aum / sliced[["strat_equity", "bench_equity"]].iloc[0].values
         
-        return Tearsheet().generate(sliced, plot_returns=plot) if not decompose else PortfolioDecomposer(self).generate(start, end, plot=True)
+        return Tearsheet().report(sliced, plot_returns=plot) if not decompose else PortfolioDecomposer(self).report(start, end, plot=True)
         
     def _daily_result(self, dt: date, plot: bool) -> Tearsheet:
         """
@@ -415,4 +415,4 @@ class Portfolio:
             Formatted portfolio description.
         """
         
-        return f"{__class__.__name__}(AUM: {self.aum}, Sharpe: {self.sharpe}, Period: [{self.t0} - {self.t1}])"
+        return f"{__class__.__name__}(AUM: ${self.aum:,.0f}, Sharpe: {self.sharpe:.2f}, Period: [{self.t0} - {self.t1}])"

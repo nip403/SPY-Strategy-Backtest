@@ -1,0 +1,19 @@
+[project]
+name = "spy-momentum-strategy-backtest"
+version = "0.1.0"
+description = "Intraday noise-area breakout backtesting engine for SPY, with pluggable cost models, portfolio decomposition, and marginal strategy-integration analysis."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Nip403" },
+]
+dependencies = [
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+    "statsmodels>=0.14",
+    "alpaca-py>=0.33",
+]

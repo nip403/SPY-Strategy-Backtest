@@ -24,9 +24,8 @@ class PortfolioDecomposer:
         self.df = self.portfolio.df
         
         self.component_tearsheets = None
-        self.decomposition = None
         
-    def generate(self, start_date: date, end_date: date, plot: bool = True) -> PortfolioDecomposer:
+    def report(self, start_date: date, end_date: date, plot: bool = True) -> PortfolioDecomposer:
         """
         Performs the long/short decomposition.
 
@@ -89,12 +88,10 @@ class PortfolioDecomposer:
         append_bench = lambda df: pd.concat([df, self.portfolio.stats.loc[start_date: end_date, ["bench_ret", "bench_dd"]]], axis=1)
            
         self.component_tearsheets = [ 
-            Tearsheet().generate(self.portfolio.stats.loc[start_date: end_date], plot_returns=False), # strat
-            Tearsheet().generate(append_bench(_l := build(net_ret["long"], positions["long"])), plot_returns=False), # long
-            Tearsheet().generate(append_bench(_s := build(net_ret["short"], positions["short"])), plot_returns=False), # short
+            Tearsheet().report(self.portfolio.stats.loc[start_date: end_date], plot_returns=False), # strat
+            Tearsheet().report(append_bench(_l := build(net_ret["long"], positions["long"])), plot_returns=False), # long
+            Tearsheet().report(append_bench(_s := build(net_ret["short"], positions["short"])), plot_returns=False), # short
         ]
-        
-        self.decomposition = [] # NOTE: needs to be updated for new Portfolio children!! 
         
         if plot:
             self._plot_decomposition(

@@ -61,7 +61,7 @@ class Tearsheet:
         
         self._data = {metric: [] for metric in self._METRICS}
         
-    def generate(self, df: pd.DataFrame, plot_returns: bool = True) -> Tearsheet:
+    def report(self, df: pd.DataFrame, plot_returns: bool = True) -> Tearsheet:
         """
         Calculate performance and risk metrics from portfolio returns.
 
