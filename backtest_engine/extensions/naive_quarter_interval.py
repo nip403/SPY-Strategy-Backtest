@@ -1,26 +1,29 @@
 import pandas as pd
 import numpy as np
+from typing import Any
 from ..core import Portfolio
 
 class PortfolioQuarterHourSample(Portfolio):
-    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, long_permissions: bool = True, short_permissions: bool = True) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         """
         Initialise a 15-minute sampled portfolio backtest - initial strategy samples every 30 mins.
 
-        df : pd.DataFrame
-            1-minute intraday market data used for signal generation and execution.
-            Must contain required OHLCV fields and datetime index.
-        aum : float = 100_000
-            Initial portfolio value.
-        target_vol : float = 0.02
-            Target volatility used for position sizing, specified in the attached paper.
-        long_permissions : bool = True
-            Whether long trades are allowed.
-        short_permissions : bool = True
-            Whether short trades are allowed.
+        **kwargs: Any
+            Base portfolio arrguments to pass on.
+            
+            df : pd.DataFrame
+                1-minute intraday market data used for signal generation and execution.
+            aum : float = 100_000
+                Initial portfolio capital used for equity calculations.
+            target_vol : float = 0.02
+                Target volatility used for position sizing.
+            long_permissions : bool = True
+                Whether long positions are permitted.
+            short_permissions : bool = True
+                Whether short positions are permitted.
         """
     
-        super().__init__(df=df, aum=aum, target_vol=target_vol, long_permissions=long_permissions, short_permissions=short_permissions)
+        super().__init__(**kwargs)
         
     def _set_positions(self, df: pd.DataFrame) -> pd.DataFrame:
         """

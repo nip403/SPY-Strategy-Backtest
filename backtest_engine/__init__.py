@@ -3,6 +3,7 @@ from .core import Portfolio
 from .extensions.naive_rolling_windows import PortfolioRollingImmediateStop, PortfolioRollingIntervalStop
 from .extensions.naive_quarter_interval import PortfolioQuarterHourSample
 from .extensions.kissel_impact import PortfolioDynamicCost
+from .extensions.fill_limit import PortfolioCappedVolume, PortfolioCappedVolumeRollover
 
 from .analysis.tearsheet import Tearsheet
 from .analysis.decomposition import PortfolioDecomposer
@@ -27,4 +28,6 @@ __all__ = [
     "PortfolioRollingIntervalStop",
     "PortfolioQuarterHourSample",
     "PortfolioDynamicCost",
+    "PortfolioCappedVolume",
+    "PortfolioCappedVolumeRollover",    
 ]

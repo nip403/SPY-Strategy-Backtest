@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from typing import Optional
+from typing import Optional, Any
 from ..core import Portfolio
 
 class PortfolioDynamicCost(Portfolio):
@@ -13,23 +13,13 @@ class PortfolioDynamicCost(Portfolio):
         "lookback": 20, # 1 trading mth
     }
     
-    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, long_permissions: bool = True, short_permissions: bool = True, coeff_config: Optional[dict] = None,) -> None:
+    def __init__(self, *, coeff_config: Optional[dict] = None, **kwargs: Any) -> None:
         """
         Initialise and run a backtest with a built-in Kissel I-Star Market Impact Model.
 
-        df : pd.DataFrame
-            1-minute intraday market data used for signal generation and execution.
-            Must contain required OHLCV fields and datetime index.
-        aum : float = 100_000
-            Initial portfolio value.
-        target_vol : float = 0.02
-            Target volatility used for position sizing.
-        long_permissions : bool = True
-            Whether long trades are allowed.
-        short_permissions : bool = True
-            Whether short trades are allowed.
         coeff_config : Optional[dict] = None
             Custom I* model coefficients overriding defaults. Coefficients are proprietary and not publicly available.
+            
             a1 : float = 700
                 Base market impact coefficient controlling overall cost magnitude. 
                 Default value is outdated by over a decade.
@@ -47,6 +37,19 @@ class PortfolioDynamicCost(Portfolio):
                 Higher values increase sensitivity to temporary impact. Default value is by LLM consensus
             lookback : int = 20
                 Number of trading days used to estimate average daily volume and volatility inputs.
+        **kwargs: Any
+            Base portfolio arrguments to pass on.
+            
+            df : pd.DataFrame
+                1-minute intraday market data used for signal generation and execution.
+            aum : float = 100_000
+                Initial portfolio capital used for equity calculations.
+            target_vol : float = 0.02
+                Target volatility used for position sizing.
+            long_permissions : bool = True
+                Whether long positions are permitted.
+            short_permissions : bool = True
+                Whether short positions are permitted.
         """
         
         self._config = {**self.DEFAULT_PARAMS, **(coeff_config or {})}
@@ -59,7 +62,7 @@ class PortfolioDynamicCost(Portfolio):
         
         self.lookback_window = self._config["lookback"]
         
-        super().__init__(df=df, aum=aum, target_vol=target_vol, long_permissions=long_permissions, short_permissions=short_permissions)
+        super().__init__(**kwargs)
     
         self._cache = self._cache.loc[self.df.index]
     

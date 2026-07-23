@@ -6,13 +6,13 @@ from matplotlib import dates as mdates
 import pandas as pd
 import numpy as np
 from datetime import date
-from typing import Optional
+from typing import Optional, Any
 from .utils import round_date
 from .analysis.tearsheet import Tearsheet
 from .analysis.decomposition import PortfolioDecomposer
 
 class Portfolio:
-    # per share frictions, naive 
+    # per share frictions, naive
     COMMISSION = 0.0035
     SLIPPAGE = 0.001
     
@@ -177,7 +177,7 @@ class Portfolio:
         return np.tile(self.df["net_ret"].to_numpy()[:, None], (1, len(aum)))
     
     @classmethod
-    def sharpe_curve(cls, df: pd.DataFrame, min_aum: int = 1e4, max_aum: int = 1e12 , base_aum: int = None, **kwargs) -> None:
+    def sharpe_curve(cls, df: pd.DataFrame, min_aum: int = 1e4, max_aum: int = 1e12 , base_aum: int = None, **kwargs: Any) -> None:
         """
         Plot strategy Sharpe ratio across different portfolio capacities.
 
@@ -189,6 +189,9 @@ class Portfolio:
             Maximum portfolio size evaluated.
         base_aum : int = None
             Reference portfolio size used for comparison.
+        **kwargs : Any
+            Additional parameters to passed to instantiate the class during construction.
+            Can include subclass-specific parameters.
         """
         
         base_aum = min_aum if base_aum is None else np.clip(base_aum, min_aum, max_aum)

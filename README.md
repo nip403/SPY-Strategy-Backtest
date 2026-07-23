@@ -6,6 +6,8 @@ Comprehensive backtesting engine designed to test the intraday volatility-breako
 
 - [main.py](main.py)
 
+Note that all `Portfolio` child classes require keyword-only parameters until the backtest pipeline is refactored into composition-style.
+
 ## Architecture
 
 ```
@@ -34,3 +36,4 @@ Alpaca API credentials are required for live data pulls (`data.request`); cached
 
 - optimise pd -> np
 - consider refactoring/consolidating tearsheet/connector/decomposer reporting fields into dataclasses
+- consider complete refactor of backtest pipeline to favour composition over inheritance
