@@ -4,7 +4,7 @@ Comprehensive backtesting engine designed to test the intraday volatility-breako
 
 ## Quickstart, Features, and Example Usage
 
-- [main.py](main.py)
+- [main.ipynb](main.ipynb)
 
 Note that all `Portfolio` child classes require keyword-only parameters until the backtest pipeline is refactored into composition-style.
 
@@ -19,7 +19,8 @@ backtest_engine/
 ├── extensions/
 │   ├── naive_rolling_windows.py     Core Portfolio example variants
 │   ├── naive_quarter_interval.py    Core Portfolio example variants
-│   └── kissel_impact.py             Core Portfolio variant (Kissel I-Star impact model)
+│   ├── kissel_impact.py             Core Portfolio variant (Kissel I-Star impact model)
+│   └── fill_limit.py                Core Portfolio variant (Execution handling)
 └── analysis/
     ├── tearsheet.py                 Tearsheet
     ├── decomposition.py             Long/short strategy decomposer
