@@ -33,5 +33,10 @@ Alpaca API credentials are required for live data pulls (`data.request`); cached
 
 ### Todo
 
+- test suite
+- shared interface for analysis layer
+- data classes for analysis
+- fix optimiser from MVO
 - optimise pd -> np
-- consider refactoring/consolidating tearsheet/connector/decomposer reporting fields into dataclasses
+- out of sample testing
+- logging, maybe
