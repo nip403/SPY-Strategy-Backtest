@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Protocol
 import pandas as pd
 import numpy as np
 
@@ -25,7 +25,8 @@ class BacktestContext:
     long_perm: bool
     short_perm: bool
 
-class StrategyComponent(Protocol):
+class StrategyComponent(ABC):
+    @abstractmethod
     def set(self, df: pd.DataFrame, ctx: BacktestContext) -> pd.DataFrame:
         """
         Generate target strategy positions from trading signals.
@@ -40,7 +41,8 @@ class StrategyComponent(Protocol):
         """
         ...
 
-class ExecutionComponent(Protocol):
+class ExecutionComponent(ABC):
+    @abstractmethod
     def fill(self, df: pd.DataFrame, ctx: BacktestContext) -> pd.DataFrame:
         """
         Constrain target positions into realistic fills.
@@ -81,8 +83,9 @@ class ExecutionComponent(Protocol):
 
         return np.tile(self._cache.to_numpy()[:, None], (1, len(aum)))
 
-class CostComponent(Protocol):
-    def compute(self, df: pd.DataFrame, ctx: BacktestContext) -> pd.DataFrame:
+class CostComponent(ABC):
+    @abstractmethod
+    def expense(self, df: pd.DataFrame, ctx: BacktestContext) -> pd.DataFrame:
         """
         Calculate net returns from gross for the backtested AUM.
 
@@ -91,15 +94,15 @@ class CostComponent(Protocol):
         ctx : BacktestContext
             Shared portfolio parameters for the backtest run.
 
-        Returns pd.Series
-            Net returns after costs, aligned to df's index.
+        Returns pd.DataFrame
+            df with "net_ret" added: returns after costs.
         """
         ...
 
     def trim(self, index: pd.Index) -> None:
         """
         Realign self._cache to the final backtest index (after dropna).
-        
+
         Override if a subclass caches more than a single DataFrame/Series.
 
         index : pd.Index
@@ -108,6 +111,7 @@ class CostComponent(Protocol):
 
         self._cache = self._cache.loc[index]
 
+    @abstractmethod
     def returns_matrix(self, aum: np.ndarray, position_matrix: np.ndarray, gross_matrix: np.ndarray) -> np.ndarray:
         """
         Generate vectorised net returns across multiple portfolio sizes.

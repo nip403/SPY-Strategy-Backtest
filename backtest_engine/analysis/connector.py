@@ -5,8 +5,6 @@ import pandas as pd
 import numpy as np
 import warnings
 
-np.random.seed(42) # for Monte Carlo
-
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 class StrategyConnector:
@@ -241,7 +239,8 @@ class StrategyConnector:
         self.metrics_df.loc["Upper Tail Dependency", s.columns] = ((s >= s.quantile(0.90)).mul(b >= b.quantile(0.90), axis=0)).sum() / (b >= b.quantile(0.90)).sum()
 
         self.metrics_df.loc["95% cVar (Historical)"] = self.daily[self.daily <= self.daily.quantile(0.05)].mean()
-        self.metrics_df.loc["95% cVar (Monte Carlo)"] = np.sort(self.daily.values[np.random.randint(0, len(self.daily), size=(10000, 252))], axis=1)[:, :12, :].mean(axis=(0, 1))
+        mc_sample = np.random.default_rng(42).integers(0, len(self.daily), size=(10000, 252))
+        self.metrics_df.loc["95% cVar (Monte Carlo)"] = np.sort(self.daily.values[mc_sample], axis=1)[:, :12, :].mean(axis=(0, 1))
     
         # market capture
         for name, mask in {
