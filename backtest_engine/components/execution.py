@@ -9,7 +9,9 @@ class NaiveExecution(ExecutionComponent):
         """
         Naive execution filler, assumes the entire desired target trade is executed when the strategy demands.
         """
-        
+
+        self._cache = df["position"]
+
         return df
 
 class CappedVolumeRolloverExecution(ExecutionComponent):
@@ -27,8 +29,9 @@ class CappedVolumeRolloverExecution(ExecutionComponent):
     def fill(self, df: pd.DataFrame, ctx: BacktestContext) -> pd.DataFrame:
         """
         Constrain target positions to a fixed % of minute volume using rollover.
-
         Accumulates tradeable volume and continuously fills orders as liquidity and signals allow.
+
+        Caches AUM-free components and wraps fill_matrix.
 
         df : pd.DataFrame
             Market data containing the "position" column produced by a Strategy.
@@ -39,46 +42,69 @@ class CappedVolumeRolloverExecution(ExecutionComponent):
             DataFrame containing the physically constrained actual portfolio positions.
         """
 
-        df["target"] = df["position"]
-
-        # maximum leverage factor allowed
-        df["capacity"] = (df["volume"] * df["close"] * self.participation_ceiling) / ctx.aum
+        target = df["position"]
+        raw_capacity = df["volume"] * df["close"] * self.participation_ceiling # capacity, AUM not yet divided in
 
         # split backtest into regimes (that have the same target); increment every time target changes
-        mask = df["target"] != df["target"].shift(1)
+        mask = target != target.shift(1)
         mask.iloc[0] = True
-        df["regime"] = mask.cumsum()
-        df["cum_cap"] = df.groupby("regime")["capacity"].cumsum() # cumulative capacity available in each regime
 
-        # regime-/trade-level summary for path-dependent starts/ends
-        regimes = pd.DataFrame({
-            "target": df.groupby("regime")["target"].first(),
-            "max_cap": df.groupby("regime")["cum_cap"].last(),
-        })
+        self._cache = pd.DataFrame({
+            "target": target,
+            "raw_capacity": raw_capacity,
+            "regime": mask.cumsum(),
+        }, index=df.index)
 
-        p_starts = np.zeros(len(regimes))
-        p_current = 0
+        df["position"] = self.fill_matrix(np.array([ctx.aum]))[:, 0]
 
-        for i, (t, mc) in enumerate(regimes.itertuples(index=False, name=None)): # O(trades)
-            p_starts[i] = p_current
+        return df
+
+    def fill_matrix(self, aum: np.ndarray) -> np.ndarray:
+        """
+        Vectorised rollover fill across multiple AUM values.
+        Regime-level greedy resolution for AUM-created path dependency.
+        
+        aum : np.ndarray
+            Portfolio capital values to evaluate.
+
+        Returns np.ndarray
+            Matrix of positions with one column per AUM value.
+        """
+
+        aum = np.asarray(aum, dtype=float)
+
+        target = self._cache["target"].to_numpy()
+        raw_capacity = self._cache["raw_capacity"].to_numpy()
+
+        # dense 0-indexed regime ids (robust to gaps left by trim() dropping leading rows)
+        _, regime = np.unique(self._cache["regime"].to_numpy(), return_inverse=True)
+        cum_cap = pd.DataFrame(raw_capacity[:, None] / aum[None, :]).groupby(regime).cumsum().to_numpy() # cumulative capacity per regime
+
+        # regime-level summary for path-dependent starts/ends
+        regime_target = pd.Series(target).groupby(regime).first().to_numpy() # (R,)
+        regime_maxcap = pd.DataFrame(cum_cap).groupby(regime).last().to_numpy() # (R, A)
+
+        p_start = np.empty_like(regime_maxcap)
+        p_current = np.zeros_like(aum)
+
+        for i, t in enumerate(regime_target): # O(regimes), vectorised across AUM
+            p_start[i] = p_current
 
             # greedily resolving regime endpoints
-            if t > p_current:
-                p_current = min(t, p_current + mc)
-            elif t < p_current:
-                p_current = max(t, p_current - mc)
+            p_current = np.where(
+                t > p_current, np.minimum(t, p_current + regime_maxcap[i]),
+                np.where(t < p_current, np.maximum(t, p_current - regime_maxcap[i]), p_current),
+            )
 
-        regimes["p_start"] = p_starts
-        df["p_start"] = df["regime"].map(regimes["p_start"])
+        p_start_bar = p_start[regime] # broadcast regime-level starts back to bar level
+        target_col = target[:, None]
 
         # matching and clipping minute by minute
-        df["position"] = np.where(
-            df["target"] > df["p_start"],
-            np.minimum(df["target"], df["p_start"] + df["cum_cap"]),
-            np.maximum(df["target"], df["p_start"] - df["cum_cap"]),
+        return np.where(
+            target_col > p_start_bar,
+            np.minimum(target_col, p_start_bar + cum_cap),
+            np.maximum(target_col, p_start_bar - cum_cap),
         )
-
-        return df.drop(columns=["target", "capacity", "regime", "cum_cap", "p_start"])
 
 class CappedVolumeExecution(ExecutionComponent):
     def __init__(self, *, participation_ceiling: float = 0.1) -> None:
@@ -98,6 +124,10 @@ class CappedVolumeExecution(ExecutionComponent):
         Executes whatever partial fill is immediately available (capped to
         self.participation_ceiling) and kills the remaining.
 
+        Caches AUM-free ingredients (target, raw per-minute capacity, signal mask) and delegates
+        the actual fill to fill_matrix, so the single-AUM path and the vectorised AUM-sweep path
+        can never drift out of sync.
+
         df : pd.DataFrame
             Market data containing the "position" column produced by a Strategy.
         ctx : BacktestContext
@@ -107,30 +137,55 @@ class CappedVolumeExecution(ExecutionComponent):
             DataFrame containing the physically constrained actual portfolio positions.
         """
 
-        df["target"] = df["position"]
+        target = df["position"]
+        raw_capacity = df["volume"] * df["close"] * self.participation_ceiling # capacity, AUM not yet divided in
 
-        # maximum leverage factor allowed
-        df["capacity"] = (df["volume"] * df["close"] * self.participation_ceiling) / ctx.aum
-
-        signal_mask = df["target"] != df["target"].shift(1)
+        signal_mask = target != target.shift(1)
         signal_mask.iloc[0] = True
 
-        # signal events, update actual positions at each leverage-change event
-        events = df.loc[signal_mask, ["target", "capacity"]].to_numpy()
+        self._cache = pd.DataFrame({
+            "target": target,
+            "raw_capacity": raw_capacity,
+            "signal": signal_mask,
+        }, index=df.index)
 
-        p_current = 0
-        actual_fills = np.zeros(len(events))
+        df["position"] = self.fill_matrix(np.array([ctx.aum]))[:, 0]
 
-        for i, (t, c) in enumerate(events): # (targets, caps)
-            if t > p_current:
-                p_current = min(t, p_current + c)
-            elif t < p_current:
-                p_current = max(t, p_current - c)
+        return df
 
-            actual_fills[i] = p_current
+    def fill_matrix(self, aum: np.ndarray) -> np.ndarray:
+        """
+        Vectorised Immediate-or-Cancel fill across multiple AUM values without rerunning fill()
+        per AUM.
 
-        df["position"] = np.nan
-        df.loc[signal_mask, "position"] = actual_fills
-        df["position"] = df["position"].ffill()
+        The only inherently sequential part is the greedy resolution at each signal-change event;
+        that loop runs once over events (not over time, not over AUM) carrying a length-len(aum)
+        vector of current positions. Unfilled bars are then forward-filled.
 
-        return df.drop(columns=["target", "capacity"])
+        aum : np.ndarray
+            Portfolio capital values to evaluate.
+
+        Returns np.ndarray
+            Matrix of positions with one column per AUM value.
+        """
+
+        aum = np.asarray(aum, dtype=float)
+
+        signal_mask = self._cache["signal"].to_numpy()
+        
+        targets = self._cache["target"].to_numpy()[signal_mask]
+        caps = self._cache["raw_capacity"].to_numpy()[signal_mask, None] / aum
+
+        p_current = np.zeros_like(aum)
+        fills = np.empty_like(caps)
+
+        for i, t in enumerate(targets): # O(events), vectorised across AUM
+            fills[i] = np.where(
+                t > p_current, np.minimum(t, p_current + caps[i]),
+                np.where(t < p_current, np.maximum(t, p_current - caps[i]), p_current),
+            )
+
+        out = np.full((len(signal_mask), len(aum)), np.nan)
+        out[signal_mask] = fills
+
+        return pd.DataFrame(out, index=self._cache.index).ffill().to_numpy()

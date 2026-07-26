@@ -142,12 +142,17 @@ class Portfolio:
 
         df = df.dropna(subset=["close", "volume", "ret", "position", "net_ret"])
         self.cost_model.trim(df.index)
+        self.execution.trim(df.index)
 
         return df
 
     def returns_matrix(self, aum: np.ndarray) -> np.ndarray:
         """
         Generate returns across multiple portfolio sizes.
+
+        Capacity-constrained execution makes positions AUM-dependent, so fills are recomputed per
+        AUM (vectorised, via execution.fill_matrix) rather than reusing the single fill this
+        instance was constructed with.
 
         aum : np.ndarray
             Portfolio capital values to evaluate.
@@ -156,9 +161,15 @@ class Portfolio:
             Matrix of returns with one column per AUM value.
         """
 
-        return self.cost_model.returns_matrix(aum)
+        aum = np.asarray(aum, dtype=float)
+        ret = self.df["ret"].to_numpy()[:, None]
 
-    @classmethod # TODO
+        position_matrix = self.execution.fill_matrix(aum)
+        gross_matrix = np.vstack([np.zeros((1, len(aum))), position_matrix[:-1]]) * ret
+
+        return self.cost_model.returns_matrix(aum, position_matrix, gross_matrix)
+
+    @classmethod
     def sharpe_curve(cls, df: pd.DataFrame, min_aum: int = 1e4, max_aum: int = 1e12 , base_aum: int = None, **kwargs: Any) -> None:
         """
         Plot strategy Sharpe ratio across different portfolio capacities.

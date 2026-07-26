@@ -38,24 +38,35 @@ class FlatCostModel(CostComponent):
             Net returns after transaction costs.
         """
 
-        self._cache = df["gross_ret"] - (df["position"].diff().abs().fillna(0) * self.frictions / df["close"])
-        df["net_ret"] = self._cache
+        self._cache = df["close"]
+
+        position_matrix = df[["position"]].to_numpy()
+        gross_matrix = df[["gross_ret"]].to_numpy()
+
+        df["net_ret"] = self.returns_matrix(np.array([ctx.aum]), position_matrix, gross_matrix)[:, 0]
 
         return df
 
-    def returns_matrix(self, aum: np.ndarray) -> np.ndarray:
+    def returns_matrix(self, aum: np.ndarray, position_matrix: np.ndarray, gross_matrix: np.ndarray) -> np.ndarray:
         """
         Generate returns across multiple portfolio sizes.
-        Costs are AUM-independent, so this trivially tiles the cached net returns.
+        Returns are always recomputed from the position_matrix (rather than assuming delta_leverage is fixed).
 
         aum : np.ndarray
             Portfolio capital values to evaluate.
+        position_matrix : np.ndarray
+            Capacity-constrained positions, one column per AUM.
+        gross_matrix : np.ndarray
+            Gross returns, one column per AUM.
 
         Returns np.ndarray
-            Matrix of returns with one column per AUM value.
+            Matrix of returns.
         """
 
-        return np.tile(self._cache.to_numpy()[:, None], (1, len(aum)))
+        turnover = np.abs(np.diff(position_matrix, axis=0, prepend=position_matrix[:1]))
+        close = self._cache.to_numpy()[:, None]
+
+        return gross_matrix - turnover * self.frictions / close
 
 class DynamicCostModel(CostComponent):
     DEFAULT_PARAMS = {
@@ -110,42 +121,107 @@ class DynamicCostModel(CostComponent):
 
     def expense(self, df: pd.DataFrame, ctx: BacktestContext) -> pd.DataFrame:
         """
-        Calculate returns after applying dynamic transaction costs.
-        
-        Derivation calculations (factoring out AUM):
-            1. Shares = (Delta Leverage x AUM) / Close
-
-            2. Permanent Cost Component = a1 x (Shares / ADV)^a2 x Volatility^a3
-                = [a1 x (Delta Leverage / (Close x ADV))^a2 x Volatility^a3] x AUM^a2
-                = Baseline Permanent Cost x AUM^a2
-
-            3. Temporary Cost Component = Permanent Cost x (Shares / Volume)^a4
-                = [Baseline Permanent Cost x (Delta Leverage / (Close x Volume))^a4] x AUM^(a2 + a4)
-                = Baseline Temporary Cost x AUM^(a2 + a4)
-
-            4. Market Impact Cost = [b1 x Baseline Temporary Cost x AUM^(a2 + a4)] + [(1 - b1) x Baseline Permanent Cost x AUM^a2]
+        Calculate returns after applying Kissel I-Star for the Portfolio's AUM.
+        Precomputes and caches the AUM-/position-independent market-microstructure inputs used by I-Star.
 
         df : pd.DataFrame
             Backtest dataframe containing positions, prices, volume, and returns.
         ctx : BacktestContext
             Shared portfolio parameters for the backtest run.
 
-        Returns pd.Series
-            Net returns after market impact and commission costs.
+        Returns pd.DataFrame
+            df with "net_ret" added: returns after market impact and commission costs.
         """
 
         dates = pd.Series(df.index.date, index=df.index)
         buckets = df.groupby(df.index.date)
 
-        # I* market impact model
-        # build cache for net returns tensor, factor out aum for vectorised calcs in returns_matrix
-        # isolate aum from i* and mi and cache for aum multiplication later
-        delta_leverage = df["position"].diff().abs().fillna(0).to_numpy()
-        close = df["close"].to_numpy()
-        volume = df["volume"].to_numpy()
+        adv = dates.map(buckets["volume"].sum().rolling(self.lookback_window).mean().shift(1)).fillna(0)
+        ann_vol = dates.map(buckets["close"].last().pct_change().rolling(self.lookback_window).std().shift(1) * np.sqrt(252)).fillna(0)
 
-        adv = dates.map(buckets["volume"].sum().rolling(self.lookback_window).mean().shift(1)).fillna(0).to_numpy()
-        ann_vol = dates.map(buckets["close"].last().pct_change().rolling(self.lookback_window).std().shift(1) * np.sqrt(252)).fillna(0).to_numpy()
+        self._cache = pd.DataFrame({
+            "close": df["close"],
+            "volume": df["volume"],
+            "adv": adv,
+            "ann_vol": ann_vol,
+        }, index=df.index)
+
+        position_matrix = df[["position"]].to_numpy()
+        gross_matrix = df[["gross_ret"]].to_numpy()
+
+        df["net_ret"] = self.returns_matrix(np.array([ctx.aum]), position_matrix, gross_matrix)[:, 0]
+
+        return df
+
+    def returns_matrix(self, aum: np.ndarray, position_matrix: np.ndarray, gross_matrix: np.ndarray) -> np.ndarray:
+        """
+        Generate net return scenarios across different portfolio sizes using the Kissel I-Star market
+        impact model.
+
+        Notation: 
+            dL = delta-leverage = |df[position]_t - df[position]_{t-1}|
+            A = aum ($)
+            P = close ($/share)
+            V = adv (average daily volume, trailing)
+            v = bar volume
+            sigma = ann_vol (annualised volatility).
+
+        Derivation:
+            1. Shares = dL x A / P
+            
+            2. I-Star prices cost in bps of dollar value traded:
+                PermCost = a1 x (Shares / V)^a2 x sigma^a3
+                TempCost = PermCost x (Shares / v)^a4
+                MI (bps) = b1 x TempCost + (1 - b1) x PermCost
+                
+            3. MI = (MI / 10_000) x dL (as a % impact on return)
+            
+            4. Substitute Shares = dL x A / P to factor out AUM:
+                adv_term = dL / (P x V)
+                participation = dL / (P x v)
+                
+                Note: 
+                (Shares / V)^a2 = A^a2 x (dL / (P x V))^a2 = A^a2 x adv_term^a2
+                (Shares / v)^a4 = A^a4 x (dL / (P x v))^a4 = A^a4 x participation^a4
+
+                Substituting:
+                PermCost = a1 x adv_term^a2 x sigma^a3 x A^a2
+                TempCost = PermCost x participation^a4 x A^a4
+                         = a1 x adv_term^a2 x sigma^a3 x participation^a4 x A^(a2 + a4)
+                              
+            5. Factoring market impact:
+                MI = [b1 x temp x A^(a2+a4) + (1 - b1) x perm x A^a2] / 10_000
+                
+                Let (AUM and dL factored out):
+                perm_base = a1 x adv_term^a2 x sigma^a3
+                temp_base = perm_base x participation^a4
+                
+                MI = dL x [b1 x temp_base x A^(a2 + a4) + (1 - b1) x perm_base x A^a2] / 10_000
+
+            6. Handle commission (AUM-independent):
+                commission % = commission_rate x Shares / A = commission_rate x dL / P
+
+            7. net_ret = gross_ret - MI - commission
+
+        aum : np.ndarray
+            Array of AUM values used to scale market impact costs.
+        position_matrix : np.ndarray
+            Capacity-constrained positions, one column per AUM value.
+        gross_matrix : np.ndarray
+            Gross returns, one column per AUM value.
+
+        Returns np.ndarray
+            Matrix of net returns with rows matching timestamps and columns matching AUM values.
+        """
+
+        aum = np.asarray(aum, dtype=float)[None, :]
+
+        delta_leverage = np.abs(np.diff(position_matrix, axis=0, prepend=position_matrix[:1]))
+
+        close = self._cache["close"].to_numpy()[:, None]
+        volume = self._cache["volume"].to_numpy()[:, None]
+        adv = self._cache["adv"].to_numpy()[:, None]
+        ann_vol = self._cache["ann_vol"].to_numpy()[:, None]
 
         # common factors, failsafe set div by volume=0 scenarios to 0
         denom_adv = close * adv
@@ -159,39 +235,6 @@ class DynamicCostModel(CostComponent):
 
         commission = np.divide(self.commission * delta_leverage, close, out=np.zeros_like(delta_leverage), where=(close != 0))
 
-        gross = (df["position"].shift(1).fillna(0) * df["ret"].fillna(0)).to_numpy()
-
-        self._cache = pd.DataFrame({
-                "gross": gross,
-                "perm": perm,
-                "temp": temp,
-                "commission": commission,
-            },
-            index=df.index,
-        )
-        
-        df["net_ret"] = pd.Series(self.returns_matrix(np.array([ctx.aum]))[:, 0], index=df.index)
-
-        return df
-
-    def returns_matrix(self, aum: np.ndarray) -> np.ndarray:
-        """
-        Generate net return scenarios across different portfolio sizes based on precomputed model params.
-
-        aum : np.ndarray
-            Array of AUM values used to scale market impact costs.
-
-        Returns np.ndarray
-            Matrix of net returns with rows matching timestamps and columns matching AUM values.
-        """
-
-        gross = self._cache["gross"].to_numpy()[:, None]
-        perm = self._cache["perm"].to_numpy()[:, None]
-        temp = self._cache["temp"].to_numpy()[:, None]
-        commission = self._cache["commission"].to_numpy()[:, None]
-
-        aum = aum[None, :]
         mkt = (self.b1 * temp * (aum ** (self.a2 + self.a4)) + (1 - self.b1) * perm * (aum ** self.a2)) / 10_000
 
-        # handle division failures upstream - potentially a bad choice
-        return np.nan_to_num(gross - mkt - commission, nan=0, posinf=0, neginf=0)
+        return gross_matrix - mkt - commission

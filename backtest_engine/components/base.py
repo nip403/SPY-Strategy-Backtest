@@ -55,6 +55,32 @@ class ExecutionComponent(Protocol):
         """
         ...
 
+    def trim(self, index: pd.Index) -> None:
+        """
+        Realign self._cache to the final backtest index (after dropna).
+
+        Override if a subclass caches more than a single DataFrame/Series.
+
+        index : pd.Index
+            Final trimmed index of the backtested portfolio dataframe.
+        """
+
+        self._cache = self._cache.loc[index]
+
+    def fill_matrix(self, aum: np.ndarray) -> np.ndarray:
+        """
+        Generate vectorised positions across multiple portfolio sizes.
+        Default implementation assumes fills are independent of AUM.
+
+        aum : np.ndarray
+            Portfolio capital values to evaluate.
+
+        Returns np.ndarray
+            Matrix of positions with one column per AUM value.
+        """
+
+        return np.tile(self._cache.to_numpy()[:, None], (1, len(aum)))
+
 class CostComponent(Protocol):
     def compute(self, df: pd.DataFrame, ctx: BacktestContext) -> pd.DataFrame:
         """
@@ -82,12 +108,19 @@ class CostComponent(Protocol):
 
         self._cache = self._cache.loc[index]
 
-    def returns_matrix(self, aum: np.ndarray) -> np.ndarray:
+    def returns_matrix(self, aum: np.ndarray, position_matrix: np.ndarray, gross_matrix: np.ndarray) -> np.ndarray:
         """
-        Generate vectorised net returns across multiple portfolio sizes without rerunning the backtest.
+        Generate vectorised net returns across multiple portfolio sizes.
+
+        position_matrix and gross_matrix are supplied by Portfolio.returns_matrix (from ExecutionComponent.fill_matrix)
+        Needed as capacity-constrained execution makes positions & therefore returns AUM-dependent.
 
         aum : np.ndarray
             Portfolio capital values to evaluate.
+        position_matrix : np.ndarray
+            Capacity-constrained positions, one column per AUM value.
+        gross_matrix : np.ndarray
+            Gross returns, one column per AUM value.
 
         Returns np.ndarray
             Matrix of net returns with one column per AUM value.
