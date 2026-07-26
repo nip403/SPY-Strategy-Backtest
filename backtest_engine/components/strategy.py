@@ -33,9 +33,10 @@ class BaseStrategy(StrategyComponent):
         df["position"] = np.nan
 
         # set positions & backtest
+        df.loc[long_exit | short_exit, "position"] = 0
         df.loc[long_entry, "position"] = 1
         df.loc[short_entry, "position"] = -1
-        df.loc[long_exit | short_exit | end_of_day, "position"] = 0
+        df.loc[end_of_day, "position"] = 0
 
         df["position"] = df["position"].ffill().fillna(0) * (ctx.target_vol / df["std"]).clip(lower=-4, upper=4)
 
@@ -82,9 +83,10 @@ class RollingImmediateStopStrategy(StrategyComponent):
         # set positions & backtest
         df["position"] = np.nan
 
+        df.loc[long_exit | short_exit, "position"] = 0
         df.loc[long_entry, "position"] = 1
         df.loc[short_entry, "position"] = -1
-        df.loc[long_exit | short_exit | end_of_day, "position"] = 0
+        df.loc[end_of_day, "position"] = 0
 
         df["position"] = df["position"].ffill().fillna(0) * (ctx.target_vol / df["std"]).clip(lower=-4, upper=4)
 
@@ -134,10 +136,11 @@ class RollingIntervalStopStrategy(StrategyComponent):
         # set positions & backtest
         df["position"] = np.nan
 
+        df.loc[long_exit | short_exit, "position"] = 0
         df.loc[long_entry, "position"] = 1
         df.loc[short_entry, "position"] = -1
-        df.loc[long_exit | short_exit | end_of_day, "position"] = 0
-
+        df.loc[end_of_day, "position"] = 0
+                
         df["position"] = df["position"].ffill().fillna(0) * (ctx.target_vol / df["std"]).clip(lower=-4, upper=4)
 
         return df
@@ -169,9 +172,10 @@ class QuarterHourSampleStrategy(StrategyComponent):
 
         df["position"] = np.nan
 
+        df.loc[long_exit | short_exit, "position"] = 0
         df.loc[long_entry, "position"] = 1
         df.loc[short_entry, "position"] = -1
-        df.loc[long_exit | short_exit | end_of_day, "position"] = 0
+        df.loc[end_of_day, "position"] = 0
 
         df["position"] = df["position"].ffill().fillna(0) * (ctx.target_vol / df["std"]).clip(lower=-4, upper=4)
 

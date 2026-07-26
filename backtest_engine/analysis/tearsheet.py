@@ -92,7 +92,8 @@ class Tearsheet:
         self.best_day = ret.idxmax().values
         self.max_loss = ret.min().values
         self.worst_day = ret.idxmin().values
-        self.win_rate = [df.loc[df["strat_ret"] > 0, "trade_count"].sum() / df["trade_count"].sum(), None] # simplified calculation using agg data, not accurate
+        total_trades = df["trade_count"].sum()
+        self.win_rate = [df["trade_wins"].sum() / total_trades if total_trades else np.nan, None] # fraction of closed trades with positive compounded return
         self.daily_win_rate = (ret > 0).mean().values # daily, not per trade
         
         self.trades_per_day = [df["trade_count"].mean(), None]
@@ -112,7 +113,7 @@ class Tearsheet:
         underwater = dd < 0
         state_changes = (underwater != underwater.shift()).cumsum()
         self.max_dd_days = [
-            f"{int(df[col].where(underwater[col]).groupby(state_changes[col]).size().max())} Days"
+            f"{int(df[col].where(underwater[col]).groupby(state_changes[col]).count().max())} Days"
             for col in ["strat_dd", "bench_dd"]
         ]
         

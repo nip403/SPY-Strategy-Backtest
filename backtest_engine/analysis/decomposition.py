@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 from datetime import date
 from .tearsheet import Tearsheet
+from ..utils import trade_stats
 
 class PortfolioDecomposer:
     def __init__(self, portfolio: Portfolio) -> None:
@@ -74,15 +75,15 @@ class PortfolioDecomposer:
             peak = np.maximum.accumulate(equity.values)
             dd = pd.Series((equity.values - peak) / peak, index=equity.index)
 
-            trade_count = (
-                ((pos != 0) & (np.sign(pos) != np.sign(pos.shift(fill_value=0))))
-                .groupby(df.index.date).sum().astype(int)
-            )
-            
+            trades = trade_stats(pos, ret)
+            trade_count = trades["trade_count"].groupby(df.index.date).sum().astype(int)
+            trade_wins = trades["trade_wins"].groupby(df.index.date).sum().astype(int)
+
             return pd.DataFrame({
                 "strat_ret": daily_ret,
                 "strat_dd": dd,
-                "trade_count": trade_count
+                "trade_count": trade_count,
+                "trade_wins": trade_wins,
             })
             
         append_bench = lambda df: pd.concat([df, self.portfolio.stats.loc[start_date: end_date, ["bench_ret", "bench_dd"]]], axis=1)

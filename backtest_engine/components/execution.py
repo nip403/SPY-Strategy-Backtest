@@ -78,7 +78,9 @@ class CappedVolumeRolloverExecution(ExecutionComponent):
 
         # dense 0-indexed regime ids (robust to gaps left by trim() dropping leading rows)
         _, regime = np.unique(self._cache["regime"].to_numpy(), return_inverse=True)
-        cum_cap = pd.DataFrame(raw_capacity[:, None] / aum[None, :]).groupby(regime).cumsum().to_numpy() # cumulative capacity per regime
+
+        capacity = np.divide(raw_capacity[:, None], aum[None, :], out=np.zeros((len(raw_capacity), len(aum))), where=(aum[None, :] > 0))
+        cum_cap = pd.DataFrame(capacity).groupby(regime).cumsum().to_numpy() # cumulative capacity per regime
 
         # regime-level summary for path-dependent starts/ends
         regime_target = pd.Series(target).groupby(regime).first().to_numpy() # (R,)
@@ -172,9 +174,11 @@ class CappedVolumeExecution(ExecutionComponent):
         aum = np.asarray(aum, dtype=float)
 
         signal_mask = self._cache["signal"].to_numpy()
-        
+
         targets = self._cache["target"].to_numpy()[signal_mask]
-        caps = self._cache["raw_capacity"].to_numpy()[signal_mask, None] / aum
+        raw_caps = self._cache["raw_capacity"].to_numpy()[signal_mask, None]
+
+        caps = np.divide(raw_caps, aum, out=np.zeros((len(raw_caps), len(aum))), where=(aum > 0))
 
         p_current = np.zeros_like(aum)
         fills = np.empty_like(caps)

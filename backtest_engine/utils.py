@@ -35,8 +35,45 @@ def round_date(date_index: pd.DataFrame, dt: date) -> date:
     
     before = dates[pos - 1]
     after = dates[pos]
-    
+
     return before if (dt - before) <= (after - dt) else after
+
+def trade_stats(position: pd.Series, net_ret: pd.Series) -> pd.DataFrame:
+    """
+    Segment a position series into discrete trades and flag trade closes and wins.
+    Trades are defined as runs of nonzero constant sign(position); sign flips signal closes.
+
+    Note net_ret[t] = position[t-1] * ret[t] - cost(position[t] - position[t-1]).
+
+    position : pd.Series
+        Leverage series.
+    net_ret : pd.Series
+        Aligned net returns.
+
+    Returns pd.DataFrame
+        Index-aligned to inputs; columns:
+            trade_count: 1 on the bar a trade closes, else 0 (sum/groupby for counts per period)
+            trade_wins: 1 on the bar a *winning* trade closes, else 0
+    """
+
+    side = np.sign(position)
+    prev_side = side.shift(fill_value=0)
+
+    # id new trades
+    new_trade = (side != prev_side) & (side != 0)
+    entry_id = new_trade.cumsum().where(side != 0)
+
+    # the trade a bar's net_ret is actually attributable to
+    trade_id = entry_id.shift(1).where(prev_side != 0, entry_id)
+    is_close = trade_id.notna() & (trade_id != trade_id.shift(-1))
+
+    trade_returns = (1 + net_ret).groupby(trade_id).prod() - 1
+    is_win = is_close & (trade_id.map(trade_returns) > 0)
+
+    return pd.DataFrame({
+        "trade_count": is_close.astype(int),
+        "trade_wins": is_win.astype(int),
+    }, index=position.index)
 
 def generate_toy_returns(
     periods: int, 

@@ -8,7 +8,7 @@ import numpy as np
 from datetime import date
 from typing import Optional, Any
 
-from .utils import round_date
+from .utils import round_date, trade_stats
 from .analysis.tearsheet import Tearsheet
 from .analysis.decomposition import PortfolioDecomposer
 from .components.base import BacktestContext, StrategyComponent, ExecutionComponent, CostComponent
@@ -244,11 +244,8 @@ class Portfolio:
         bench_peak = np.maximum.accumulate(bench_equity.values)
         bench_dd = pd.Series((bench_equity.values - bench_peak) / bench_peak, index=bench_equity.index)
 
-        # trade count, only count entries and flips, and not position changes on the same side
-        trade_count = (
-            ((self.df["position"] != 0) & (np.sign(self.df["position"]) != np.sign(self.df["position"].shift(fill_value=0))))
-            .groupby(self.df.index.date).sum().astype(int)
-        )
+        # trade count/wins, triggered on trade closes
+        trades = trade_stats(self.df["position"], self.df["net_ret"])[["trade_count", "trade_wins"]].groupby(self.df.index.date).sum().astype(int)
 
         return pd.DataFrame({
             "strat_equity": strat_equity,
@@ -257,7 +254,8 @@ class Portfolio:
             "bench_ret": bench_ret,
             "strat_dd": strat_dd,
             "bench_dd": bench_dd,
-            "trade_count": trade_count,
+            "trade_count": trades["trade_count"],
+            "trade_wins": trades["trade_wins"],
         })
 
     @property
