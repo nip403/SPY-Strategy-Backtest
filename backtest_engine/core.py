@@ -94,10 +94,8 @@ class Portfolio:
         df["prev_close"] = pd.Series(df.index.date, index=df.index).map(closes.shift(1))
 
         # for position sizing
-        closes = df.groupby(df.index.date)["close"].last()
         returns = closes.pct_change()
 
-        df["mu"] = pd.Series(df.index.date, index=df.index).map(returns.rolling(window=14).mean().shift(1))
         df["std"] = pd.Series(df.index.date, index=df.index).map(returns.rolling(window=14).std().shift(1))
         df["ret"] = df["close"].pct_change()
 
