@@ -5,12 +5,12 @@ import numpy as np
 from .base import BacktestContext, ExecutionComponent
 
 class NaiveExecution(ExecutionComponent):
-    def fill(self, df: pd.DataFrame, ctx: BacktestContext) -> pd.DataFrame:
+    def fill(self, df: pd.DataFrame, ctx: BacktestContext, cache: dict) -> pd.DataFrame:
         """
         Naive execution filler, assumes the entire desired target trade is executed when the strategy demands.
         """
 
-        self._cache = df["position"]
+        cache["position"] = df["position"]
 
         return df
 
@@ -26,7 +26,7 @@ class CappedVolumeRolloverExecution(ExecutionComponent):
 
         self.participation_ceiling = participation_ceiling
 
-    def fill(self, df: pd.DataFrame, ctx: BacktestContext) -> pd.DataFrame:
+    def fill(self, df: pd.DataFrame, ctx: BacktestContext, cache: dict) -> pd.DataFrame:
         """
         Constrain target positions to a fixed % of minute volume using rollover.
         Accumulates tradeable volume and continuously fills orders as liquidity and signals allow.
@@ -37,35 +37,39 @@ class CappedVolumeRolloverExecution(ExecutionComponent):
             Market data containing the "position" column produced by a Strategy.
         ctx : BacktestContext
             Shared portfolio parameters for the backtest run.
+        cache : dict
+            This Portfolio's cache.
 
         Returns pd.DataFrame
             DataFrame containing the physically constrained actual portfolio positions.
         """
 
         target = df["position"]
-        raw_capacity = df["volume"] * df["close"] * self.participation_ceiling # capacity, AUM not yet divided in
+        close = cache.setdefault("close", df["close"])
+        volume = cache.setdefault("volume", df["volume"])
+        raw_capacity = volume * close * self.participation_ceiling # capacity, AUM not yet divided in
 
         # split backtest into regimes (that have the same target); increment every time target changes
         mask = target != target.shift(1)
         mask.iloc[0] = True
 
-        self._cache = pd.DataFrame({
-            "target": target,
-            "raw_capacity": raw_capacity,
-            "regime": mask.cumsum(),
-        }, index=df.index)
+        cache["rollover_target"] = target
+        cache["rollover_raw_capacity"] = raw_capacity
+        cache["rollover_regime"] = mask.cumsum()
 
-        df["position"] = self.fill_matrix(np.array([ctx.aum]))[:, 0]
+        df["position"] = self.fill_matrix(np.array([ctx.aum]), cache)[:, 0]
 
         return df
 
-    def fill_matrix(self, aum: np.ndarray) -> np.ndarray:
+    def fill_matrix(self, aum: np.ndarray, cache: dict) -> np.ndarray:
         """
         Vectorised rollover fill across multiple AUM values.
         Regime-level greedy resolution for AUM-created path dependency.
-        
+
         aum : np.ndarray
             Portfolio capital values to evaluate.
+        cache : dict
+            This Portfolio's cache, as populated by fill().
 
         Returns np.ndarray
             Matrix of positions with one column per AUM value.
@@ -73,11 +77,11 @@ class CappedVolumeRolloverExecution(ExecutionComponent):
 
         aum = np.asarray(aum, dtype=float)
 
-        target = self._cache["target"].to_numpy()
-        raw_capacity = self._cache["raw_capacity"].to_numpy()
+        target = cache["rollover_target"].to_numpy()
+        raw_capacity = cache["rollover_raw_capacity"].to_numpy()
 
-        # dense 0-indexed regime ids (robust to gaps left by trim() dropping leading rows)
-        _, regime = np.unique(self._cache["regime"].to_numpy(), return_inverse=True)
+        # dense 0-indexed regime ids (robust to any gaps in the underlying regime numbering)
+        _, regime = np.unique(cache["rollover_regime"].to_numpy(), return_inverse=True)
 
         capacity = np.divide(raw_capacity[:, None], aum[None, :], out=np.zeros((len(raw_capacity), len(aum))), where=(aum[None, :] > 0))
         cum_cap = pd.DataFrame(capacity).groupby(regime).cumsum().to_numpy() # cumulative capacity per regime
@@ -119,7 +123,7 @@ class CappedVolumeExecution(ExecutionComponent):
 
         self.participation_ceiling = participation_ceiling
 
-    def fill(self, df: pd.DataFrame, ctx: BacktestContext) -> pd.DataFrame:
+    def fill(self, df: pd.DataFrame, ctx: BacktestContext, cache: dict) -> pd.DataFrame:
         """
         Constrain target positions using an Immediate-or-Cancel model.
 
@@ -134,28 +138,30 @@ class CappedVolumeExecution(ExecutionComponent):
             Market data containing the "position" column produced by a Strategy.
         ctx : BacktestContext
             Shared portfolio parameters for the backtest run.
+        cache : dict
+            This Portfolio's cache.
 
         Returns pd.DataFrame
             DataFrame containing the physically constrained actual portfolio positions.
         """
 
         target = df["position"]
-        raw_capacity = df["volume"] * df["close"] * self.participation_ceiling # capacity, AUM not yet divided in
+        close = cache.setdefault("close", df["close"])
+        volume = cache.setdefault("volume", df["volume"])
+        raw_capacity = volume * close * self.participation_ceiling # capacity, AUM not yet divided in
 
         signal_mask = target != target.shift(1)
         signal_mask.iloc[0] = True
 
-        self._cache = pd.DataFrame({
-            "target": target,
-            "raw_capacity": raw_capacity,
-            "signal": signal_mask,
-        }, index=df.index)
+        cache["ioc_target"] = target
+        cache["ioc_raw_capacity"] = raw_capacity
+        cache["ioc_signal"] = signal_mask
 
-        df["position"] = self.fill_matrix(np.array([ctx.aum]))[:, 0]
+        df["position"] = self.fill_matrix(np.array([ctx.aum]), cache)[:, 0]
 
         return df
 
-    def fill_matrix(self, aum: np.ndarray) -> np.ndarray:
+    def fill_matrix(self, aum: np.ndarray, cache: dict) -> np.ndarray:
         """
         Vectorised Immediate-or-Cancel fill across multiple AUM values without rerunning fill()
         per AUM.
@@ -166,6 +172,8 @@ class CappedVolumeExecution(ExecutionComponent):
 
         aum : np.ndarray
             Portfolio capital values to evaluate.
+        cache : dict
+            This Portfolio's cache, as populated by fill().
 
         Returns np.ndarray
             Matrix of positions with one column per AUM value.
@@ -173,10 +181,10 @@ class CappedVolumeExecution(ExecutionComponent):
 
         aum = np.asarray(aum, dtype=float)
 
-        signal_mask = self._cache["signal"].to_numpy()
+        signal_mask = cache["ioc_signal"].to_numpy()
 
-        targets = self._cache["target"].to_numpy()[signal_mask]
-        raw_caps = self._cache["raw_capacity"].to_numpy()[signal_mask, None]
+        targets = cache["ioc_target"].to_numpy()[signal_mask]
+        raw_caps = cache["ioc_raw_capacity"].to_numpy()[signal_mask, None]
 
         caps = np.divide(raw_caps, aum, out=np.zeros((len(raw_caps), len(aum))), where=(aum > 0))
 
@@ -192,4 +200,4 @@ class CappedVolumeExecution(ExecutionComponent):
         out = np.full((len(signal_mask), len(aum)), np.nan)
         out[signal_mask] = fills
 
-        return pd.DataFrame(out, index=self._cache.index).ffill().to_numpy()
+        return pd.DataFrame(out, index=cache["ioc_target"].index).ffill().to_numpy()

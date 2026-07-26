@@ -43,76 +43,60 @@ class StrategyComponent(ABC):
 
 class ExecutionComponent(ABC):
     @abstractmethod
-    def fill(self, df: pd.DataFrame, ctx: BacktestContext) -> pd.DataFrame:
+    def fill(self, df: pd.DataFrame, ctx: BacktestContext, cache: dict) -> pd.DataFrame:
         """
         Constrain target positions into realistic fills.
+        Cache is owned by the Portfolio instance, and cache key/item management is handled within the component methods.
 
         df : pd.DataFrame
             Market data containing the "position" column produced by a Strategy.
         ctx : BacktestContext
             Shared portfolio parameters for the backtest run.
+        cache : dict
+            The portfolio's cache, to populate with whatever fill_matrix will later need.
 
         Returns pd.DataFrame
             DataFrame with "position" replaced by the capacity-constrained actual position.
         """
         ...
 
-    def trim(self, index: pd.Index) -> None:
-        """
-        Realign self._cache to the final backtest index (after dropna).
-
-        Override if a subclass caches more than a single DataFrame/Series.
-
-        index : pd.Index
-            Final trimmed index of the backtested portfolio dataframe.
-        """
-
-        self._cache = self._cache.loc[index]
-
-    def fill_matrix(self, aum: np.ndarray) -> np.ndarray:
+    def fill_matrix(self, aum: np.ndarray, cache: dict) -> np.ndarray:
         """
         Generate vectorised positions across multiple portfolio sizes.
         Default implementation assumes fills are independent of AUM.
 
         aum : np.ndarray
             Portfolio capital values to evaluate.
+        cache : dict
+            The Portfolio's cache, populated by fill().
 
         Returns np.ndarray
             Matrix of positions with one column per AUM value.
         """
 
-        return np.tile(self._cache.to_numpy()[:, None], (1, len(aum)))
+        return np.tile(cache["position"].to_numpy()[:, None], (1, len(aum)))
 
 class CostComponent(ABC):
     @abstractmethod
-    def expense(self, df: pd.DataFrame, ctx: BacktestContext) -> pd.DataFrame:
+    def expense(self, df: pd.DataFrame, ctx: BacktestContext, cache: dict) -> pd.DataFrame:
         """
         Calculate net returns from gross for the backtested AUM.
+        Cache is owned by the Portfolio instance, and cache key/item management is handled within the component methods.
 
         df : pd.DataFrame
             Backtest data containing gross returns and final positions.
         ctx : BacktestContext
             Shared portfolio parameters for the backtest run.
+        cache : dict
+            The portfolio's cache, to populate with whatever returns_matrix will later need.
 
         Returns pd.DataFrame
             df with "net_ret" added: returns after costs.
         """
         ...
 
-    def trim(self, index: pd.Index) -> None:
-        """
-        Realign self._cache to the final backtest index (after dropna).
-
-        Override if a subclass caches more than a single DataFrame/Series.
-
-        index : pd.Index
-            Final trimmed index of the backtested portfolio dataframe.
-        """
-
-        self._cache = self._cache.loc[index]
-
     @abstractmethod
-    def returns_matrix(self, aum: np.ndarray, position_matrix: np.ndarray, gross_matrix: np.ndarray) -> np.ndarray:
+    def returns_matrix(self, aum: np.ndarray, position_matrix: np.ndarray, gross_matrix: np.ndarray, cache: dict) -> np.ndarray:
         """
         Generate vectorised net returns across multiple portfolio sizes.
 
@@ -125,6 +109,8 @@ class CostComponent(ABC):
             Capacity-constrained positions, one column per AUM value.
         gross_matrix : np.ndarray
             Gross returns, one column per AUM value.
+        cache : dict
+            The Portfolio's cache, populated by expense().
 
         Returns np.ndarray
             Matrix of net returns with one column per AUM value.

@@ -19,10 +19,8 @@ class FlatCostModel(CostComponent):
         self.commission = commission
         self.slippage = slippage
         self.frictions = commission + slippage
-        
-        self._cache = None
 
-    def expense(self, df: pd.DataFrame, ctx: BacktestContext) -> pd.DataFrame:
+    def expense(self, df: pd.DataFrame, ctx: BacktestContext, cache: dict) -> pd.DataFrame:
         """
         Calculate transaction costs return net returns.
         Applies commissions and slippage based on changes in portfolio exposure when positions are adjusted.
@@ -33,21 +31,23 @@ class FlatCostModel(CostComponent):
             Backtest data containing gross returns and positions.
         ctx : BacktestContext
             Shared portfolio parameters for the backtest run.
+        cache : dict
+            This Portfolio's cache.
 
         Returns pd.Series
             Net returns after transaction costs.
         """
 
-        self._cache = df["close"]
+        cache.setdefault("close", df["close"])
 
         position_matrix = df[["position"]].to_numpy()
         gross_matrix = df[["gross_ret"]].to_numpy()
 
-        df["net_ret"] = self.returns_matrix(np.array([ctx.aum]), position_matrix, gross_matrix)[:, 0]
+        df["net_ret"] = self.returns_matrix(np.array([ctx.aum]), position_matrix, gross_matrix, cache)[:, 0]
 
         return df
 
-    def returns_matrix(self, aum: np.ndarray, position_matrix: np.ndarray, gross_matrix: np.ndarray) -> np.ndarray:
+    def returns_matrix(self, aum: np.ndarray, position_matrix: np.ndarray, gross_matrix: np.ndarray, cache: dict) -> np.ndarray:
         """
         Generate returns across multiple portfolio sizes.
         Returns are always recomputed from the position_matrix (rather than assuming delta_leverage is fixed).
@@ -58,13 +58,15 @@ class FlatCostModel(CostComponent):
             Capacity-constrained positions, one column per AUM.
         gross_matrix : np.ndarray
             Gross returns, one column per AUM.
+        cache : dict
+            This Portfolio's cache, as populated by expense().
 
         Returns np.ndarray
             Matrix of returns.
         """
 
         turnover = np.abs(np.diff(position_matrix, axis=0, prepend=position_matrix[:1]))
-        close = self._cache.to_numpy()[:, None]
+        close = cache["close"].to_numpy()[:, None]
 
         return gross_matrix - turnover * self.frictions / close
 
@@ -116,10 +118,8 @@ class DynamicCostModel(CostComponent):
 
         self.lookback_window = self._config["lookback"]
         self.commission = commission
-        
-        self._cache = None
 
-    def expense(self, df: pd.DataFrame, ctx: BacktestContext) -> pd.DataFrame:
+    def expense(self, df: pd.DataFrame, ctx: BacktestContext, cache: dict) -> pd.DataFrame:
         """
         Calculate returns after applying Kissel I-Star for the Portfolio's AUM.
         Precomputes and caches the AUM-/position-independent market-microstructure inputs used by I-Star.
@@ -128,6 +128,8 @@ class DynamicCostModel(CostComponent):
             Backtest dataframe containing positions, prices, volume, and returns.
         ctx : BacktestContext
             Shared portfolio parameters for the backtest run.
+        cache : dict
+            This Portfolio's cache.
 
         Returns pd.DataFrame
             df with "net_ret" added: returns after market impact and commission costs.
@@ -139,24 +141,21 @@ class DynamicCostModel(CostComponent):
         adv = dates.map(buckets["volume"].sum().rolling(self.lookback_window).mean().shift(1)).fillna(0)
         ann_vol = dates.map(buckets["close"].last().pct_change().rolling(self.lookback_window).std().shift(1) * np.sqrt(252)).fillna(0)
 
-        self._cache = pd.DataFrame({
-            "close": df["close"],
-            "volume": df["volume"],
-            "adv": adv,
-            "ann_vol": ann_vol,
-        }, index=df.index)
+        cache.setdefault("close", df["close"])
+        cache.setdefault("volume", df["volume"])
+        cache["adv"] = adv
+        cache["ann_vol"] = ann_vol
 
         position_matrix = df[["position"]].to_numpy()
         gross_matrix = df[["gross_ret"]].to_numpy()
 
-        df["net_ret"] = self.returns_matrix(np.array([ctx.aum]), position_matrix, gross_matrix)[:, 0]
+        df["net_ret"] = self.returns_matrix(np.array([ctx.aum]), position_matrix, gross_matrix, cache)[:, 0]
 
         return df
 
-    def returns_matrix(self, aum: np.ndarray, position_matrix: np.ndarray, gross_matrix: np.ndarray) -> np.ndarray:
+    def returns_matrix(self, aum: np.ndarray, position_matrix: np.ndarray, gross_matrix: np.ndarray, cache: dict) -> np.ndarray:
         """
-        Generate net return scenarios across different portfolio sizes using the Kissel I-Star market
-        impact model.
+        Generate net return scenarios across different portfolio sizes using the Kissel I-Star market impact model.
 
         Notation: 
             dL = delta-leverage = |df[position]_t - df[position]_{t-1}|
@@ -209,6 +208,8 @@ class DynamicCostModel(CostComponent):
             Capacity-constrained positions, one column per AUM value.
         gross_matrix : np.ndarray
             Gross returns, one column per AUM value.
+        cache : dict
+            The portfolio's cache, populated by expense().
 
         Returns np.ndarray
             Matrix of net returns with rows matching timestamps and columns matching AUM values.
@@ -218,10 +219,10 @@ class DynamicCostModel(CostComponent):
 
         delta_leverage = np.abs(np.diff(position_matrix, axis=0, prepend=position_matrix[:1]))
 
-        close = self._cache["close"].to_numpy()[:, None]
-        volume = self._cache["volume"].to_numpy()[:, None]
-        adv = self._cache["adv"].to_numpy()[:, None]
-        ann_vol = self._cache["ann_vol"].to_numpy()[:, None]
+        close = cache["close"].to_numpy()[:, None]
+        volume = cache["volume"].to_numpy()[:, None]
+        adv = cache["adv"].to_numpy()[:, None]
+        ann_vol = cache["ann_vol"].to_numpy()[:, None]
 
         # common factors, failsafe set div by volume=0 scenarios to 0
         denom_adv = close * adv

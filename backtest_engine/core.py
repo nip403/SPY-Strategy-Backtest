@@ -65,6 +65,8 @@ class Portfolio:
             short_perm=short_permissions,
         )
 
+        self.cache = {}
+
         self.df = self._backtest(df.copy())
 
         self.t0 = self.df.index[0].date()
@@ -116,7 +118,6 @@ class Portfolio:
         Execute the complete backtest simulation.
 
         Applies preprocessing, signal generation, execution, and costing to get net returns and equity curves.
-
         Preprocessing needs to be subclassed, rather than composed.
 
         df : pd.DataFrame
@@ -127,20 +128,19 @@ class Portfolio:
         """
 
         df = self._preprocess(df)
-        
+
         df = self.strategy.set(df, self.context)
-        df = self.execution.fill(df, self.context)
+        df = self.execution.fill(df, self.context, self.cache)
 
         df["gross_ret"] = df["position"].shift(1).fillna(0) * df["ret"]
-        df = self.cost_model.expense(df, self.context)
+        df = self.cost_model.expense(df, self.context, self.cache)
 
         df["cum_ret"] = (1 + df["net_ret"].fillna(0)).cumprod()
         df["equity_curve"] = self.aum * df["cum_ret"]
         df["benchmark"] = (1 + df["ret"].fillna(0)).cumprod() * self.aum
 
         df = df.dropna(subset=["close", "volume", "ret", "position", "net_ret"])
-        self.cost_model.trim(df.index)
-        self.execution.trim(df.index)
+        self.cache = {key: series.loc[df.index] for key, series in self.cache.items()}
 
         return df
 
@@ -162,10 +162,10 @@ class Portfolio:
         aum = np.asarray(aum, dtype=float)
         ret = self.df["ret"].to_numpy()[:, None]
 
-        position_matrix = self.execution.fill_matrix(aum)
+        position_matrix = self.execution.fill_matrix(aum, self.cache)
         gross_matrix = np.vstack([np.zeros((1, len(aum))), position_matrix[:-1]]) * ret
 
-        return self.cost_model.returns_matrix(aum, position_matrix, gross_matrix)
+        return self.cost_model.returns_matrix(aum, position_matrix, gross_matrix, self.cache)
 
     @classmethod
     def sharpe_curve(cls, df: pd.DataFrame, min_aum: int = 1e4, max_aum: int = 1e12 , base_aum: int = None, **kwargs: Any) -> None:
