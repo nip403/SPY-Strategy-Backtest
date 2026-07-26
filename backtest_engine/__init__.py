@@ -1,9 +1,9 @@
 from .core import Portfolio
 
-from .extensions.naive_rolling_windows import PortfolioRollingImmediateStop, PortfolioRollingIntervalStop
-from .extensions.naive_quarter_interval import PortfolioQuarterHourSample
-from .extensions.kissel_impact import PortfolioDynamicCost
-from .extensions.fill_limit import PortfolioCappedVolume, PortfolioCappedVolumeRollover
+from .components.base import BacktestContext, StrategyComponent, ExecutionComponent, CostComponent
+from .components.strategy import BaseStrategy, RollingImmediateStopStrategy, RollingIntervalStopStrategy, QuarterHourSampleStrategy
+from .components.execution import NaiveExecution, CappedVolumeExecution, CappedVolumeRolloverExecution
+from .components.cost_model import FlatCostModel, DynamicCostModel
 
 from .analysis.tearsheet import Tearsheet
 from .analysis.decomposition import PortfolioDecomposer
@@ -24,10 +24,20 @@ __all__ = [
     "StrategyConnector",
 
     "Portfolio",
-    "PortfolioRollingImmediateStop",
-    "PortfolioRollingIntervalStop",
-    "PortfolioQuarterHourSample",
-    "PortfolioDynamicCost",
-    "PortfolioCappedVolume",
-    "PortfolioCappedVolumeRollover",    
+
+    "BacktestContext",
+    "StrategyComponent",
+    "ExecutionComponent",
+    "CostComponent",
+
+    "BaseStrategy",
+    "RollingImmediateStopStrategy",
+    "RollingIntervalStopStrategy",
+    "QuarterHourSampleStrategy",
+
+    "CappedVolumeExecution",
+    "CappedVolumeRolloverExecution",
+
+    "FlatCostModel",
+    "DynamicCostModel",
 ]

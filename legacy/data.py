@@ -59,17 +59,25 @@ def _preprocess(alpaca_df: pd.DataFrame) -> pd.DataFrame:
     Convert raw Alpaca bars into strategy-ready intraday market data.
     Hardcoded compatibility with US equities.
 
-    Converts timestamps and filter to regular US equity trading hours.
+    Converts timestamps, filters regular US equity trading hours, calculates VWAP, daily open prices, and previous close values.
 
     alpaca_df : pd.DataFrame
         Raw minute bar data returned by Alpaca.
 
     Returns pd.DataFrame
-        Cleaned intraday OHLCV data.
+        Cleaned intraday OHLCV data with derived market fields.
     """
     
     df = alpaca_df.tz_convert("America/New_York", level="timestamp").droplevel("symbol")
     df = df[df.index.dayofweek < 5].between_time("09:30", "15:59")[["open", "high", "low", "close", "volume"]].sort_index()
+
+    pv = df["volume"] * (df["high"] + df["low"] + df["close"]) / 3 
+    df["vwap"] = pv.groupby(df.index.date).cumsum() / df["volume"].groupby(df.index.date).cumsum()
+
+    df["daily_open"] = df.groupby(pd.Grouper(freq="D"))["open"].transform("first")
+
+    closes = df.groupby(df.index.date)["close"].last()
+    df["prev_close"] = pd.Series(df.index.date, index=df.index).map(closes.shift(1))
 
     df["time"] = df.index.time
     
