@@ -239,6 +239,7 @@ def generate_toy_equity(
         )
         
         equity = (1 + returns_matrix).cumprod(axis=0) * portfolio.aum
+        valid = np.ones(expected_return.shape, dtype=bool) # no idiosyncratic-variance constraint applies without a benchmark
 
         labels = [
             f"{f"S:{r / v if v else 0:.1f}" if sharpe is not None else f"R:{r:.3f}"}|σ:{v:.3f}|β:{b:.1f}"
