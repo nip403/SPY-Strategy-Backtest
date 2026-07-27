@@ -5,6 +5,8 @@ from .components.strategy import BaseStrategy, RollingImmediateStopStrategy, Rol
 from .components.execution import NaiveExecution, CappedVolumeExecution, CappedVolumeRolloverExecution
 from .components.cost_model import FlatCostModel, DynamicCostModel
 
+from .analysis.base import AnalysisReport
+from .analysis.metrics import SeriesMetrics, TradeMetrics, RelativeMetrics, ConnectorExtras, DailySnapshot
 from .analysis.tearsheet import Tearsheet
 from .analysis.decomposition import PortfolioDecomposer
 from .analysis.connector import StrategyConnector
@@ -18,6 +20,13 @@ __all__ = [
 
     "generate_toy_returns",
     "generate_toy_equity",
+
+    "AnalysisReport",
+    "SeriesMetrics",
+    "TradeMetrics",
+    "RelativeMetrics",
+    "ConnectorExtras",
+    "DailySnapshot",
 
     "Tearsheet",
     "PortfolioDecomposer",

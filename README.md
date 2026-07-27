@@ -20,6 +20,8 @@ backtest_engine/
 │   ├── execution.py                 Fill/capacity-constraint models
 │   └── cost_model.py                Cost models
 └── analysis/
+    ├── base.py                      Shared AnalysisReport interface
+    ├── metrics.py                   Shared metric dataclasses + computation
     ├── tearsheet.py                 Tearsheet
     ├── decomposition.py             Long/short strategy decomposer
     └── connector.py                 Book integration analysis
@@ -34,8 +36,6 @@ Alpaca API credentials are required for live data pulls (`data.request`); cached
 ### Todo
 
 - test suite
-- shared interface for analysis layer
-- data classes for analysis
 - fix optimiser from MVO
 - optimise pd -> np/numba
 - out of sample testing

@@ -38,6 +38,21 @@ def round_date(date_index: pd.DataFrame, dt: date) -> date:
 
     return before if (dt - before) <= (after - dt) else after
 
+def compute_drawdown(equity: pd.Series) -> pd.Series:
+    """
+    Compute a running drawdown series from an equity curve.
+
+    equity : pd.Series
+        Cumulative equity/growth-factor series.
+
+    Returns pd.Series
+        Drawdown (<=0) at each point, relative to the running peak.
+    """
+
+    peak = np.maximum.accumulate(equity.to_numpy())
+
+    return pd.Series((equity.to_numpy() - peak) / peak, index=equity.index)
+
 def trade_stats(position: pd.Series, net_ret: pd.Series) -> pd.DataFrame:
     """
     Segment a position series into discrete trades and flag trade closes and wins.
@@ -74,6 +89,9 @@ def trade_stats(position: pd.Series, net_ret: pd.Series) -> pd.DataFrame:
         "trade_count": is_close.astype(int),
         "trade_wins": is_win.astype(int),
     }, index=position.index)
+    
+def _safe_div(num: float, denom: float) -> float:
+    return num / denom if denom else float("nan")
 
 def generate_toy_returns(
     periods: int,

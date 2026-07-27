@@ -8,7 +8,8 @@ import numpy as np
 from datetime import date
 from typing import Optional, Any
 
-from .utils import round_date, trade_stats
+from .utils import round_date, trade_stats, compute_drawdown
+from .analysis.metrics import DailySnapshot
 from .analysis.tearsheet import Tearsheet
 from .analysis.decomposition import PortfolioDecomposer
 from .components.base import BacktestContext, StrategyComponent, ExecutionComponent, CostComponent
@@ -238,11 +239,8 @@ class Portfolio:
         bench_ret.iloc[0] = (bench_equity.iloc[0] / self.aum) - 1
 
         # drawdown
-        strat_peak = np.maximum.accumulate(strat_equity.values)
-        strat_dd = pd.Series((strat_equity.values - strat_peak) / strat_peak, index=strat_equity.index)
-
-        bench_peak = np.maximum.accumulate(bench_equity.values)
-        bench_dd = pd.Series((bench_equity.values - bench_peak) / bench_peak, index=bench_equity.index)
+        strat_dd = compute_drawdown(strat_equity)
+        bench_dd = compute_drawdown(bench_equity)
 
         # trade count/wins, triggered on trade closes
         trades = trade_stats(self.df["position"], self.df["net_ret"])[["trade_count", "trade_wins"]].groupby(self.df.index.date).sum().astype(int)
@@ -270,7 +268,7 @@ class Portfolio:
 
         return float((r := self.stats["strat_ret"]).mean() / r.std() * 252**0.5)
 
-    def report(self, *, day: Optional[date] = None, start: Optional[date] = None, end: Optional[date] = None, plot: bool = True, decompose: bool = False) -> Tearsheet | PortfolioDecomposer:
+    def report(self, *, day: Optional[date] = None, start: Optional[date] = None, end: Optional[date] = None, plot: bool = True, decompose: bool = False) -> Tearsheet | PortfolioDecomposer | DailySnapshot:
         """
         Generate a portfolio performance report.
         Supports analysis for a single-day slice, period performance, and optional portfolio decomposition into long/short.
@@ -325,9 +323,14 @@ class Portfolio:
         sliced = self.stats[start:end].copy()
         sliced[["strat_equity", "bench_equity"]] *= self.aum / sliced[["strat_equity", "bench_equity"]].iloc[0].values
 
-        return Tearsheet().report(sliced, plot_returns=plot) if not decompose else PortfolioDecomposer(self).report(start, end, plot=True)
+        result = Tearsheet(sliced) if not decompose else PortfolioDecomposer(self, start, end)
+        
+        if plot:
+            result.report()
 
-    def _daily_result(self, dt: date, plot: bool) -> Tearsheet:
+        return result
+
+    def _daily_result(self, dt: date, plot: bool) -> DailySnapshot:
         """
         Internal (strategy-specific) method to generate an intraday analysis for a single trading day.
 
@@ -391,12 +394,10 @@ class Portfolio:
             plt.tight_layout()
             plt.show()
 
-        t = Tearsheet()
-
-        t.strat_cum_return = self.stats.loc[dt]["strat_ret"]
-        t.bench_cum_return = self.stats.loc[dt]["bench_ret"] # includes overnight (i.e. from prev close)
-
-        return t
+        return DailySnapshot(
+            strat_cum_return=self.stats.loc[dt]["strat_ret"],
+            bench_cum_return=self.stats.loc[dt]["bench_ret"], # includes overnight (i.e. from prev close)
+        )
 
     def __str__(self) -> str:
         """
