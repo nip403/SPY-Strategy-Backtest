@@ -194,8 +194,10 @@ class CappedVolumeExecution(ExecutionComponent):
                 t > p_current, np.minimum(t, p_current + caps[i]),
                 np.where(t < p_current, np.maximum(t, p_current - caps[i]), p_current),
             )
+            p_current = fills[i]
 
         out = np.full((len(signal_mask), len(aum)), np.nan)
         out[signal_mask] = fills
 
-        return pd.DataFrame(out, index=ioc.index).ffill().to_numpy()
+        # match the portfolio's actual starting state
+        return pd.DataFrame(out, index=ioc.index).ffill().fillna(0).to_numpy()

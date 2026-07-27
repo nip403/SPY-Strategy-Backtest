@@ -19,7 +19,7 @@ from .components.execution import NaiveExecution
 from .components.cost_model import FlatCostModel
 
 class Portfolio:
-    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, long_permissions: bool = True, short_permissions: bool = True, *, strategy: Optional[StrategyComponent] = None, execution: Optional[ExecutionComponent] = None, cost_model: Optional[CostComponent] = None) -> None:
+    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, long_permissions: bool = True, short_permissions: bool = True, *, strategy_model: Optional[StrategyComponent] = None, execution_model: Optional[ExecutionComponent] = None, cost_model: Optional[CostComponent] = None) -> None:
         """
         Initialise and run a complete portfolio backtest.
         Strategy is modelled from "Beat the Market" paper, attached in repo.
@@ -56,8 +56,8 @@ class Portfolio:
         self.long_perm = long_permissions
         self.short_perm = short_permissions
 
-        self.strategy = strategy or BaseStrategy()
-        self.execution = execution or NaiveExecution()
+        self.strategy = strategy_model or BaseStrategy()
+        self.execution = execution_model or NaiveExecution()
         self.cost_model = cost_model or FlatCostModel()
 
         self.context = BacktestContext(

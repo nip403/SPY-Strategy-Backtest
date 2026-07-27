@@ -239,8 +239,15 @@ def generate_toy_equity(
         )
         
         equity = (1 + returns_matrix).cumprod(axis=0) * portfolio.aum
-        
-        return pd.Series(equity[:, 0], index=portfolio.df.index) if is_scalar else pd.DataFrame(equity, index=portfolio.df.index)
+
+        labels = [
+            f"{f"S:{r / v if v else 0:.1f}" if sharpe is not None else f"R:{r:.3f}"}|σ:{v:.3f}|β:{b:.1f}"
+            for r, v, b in zip(expected_return, volatility, beta)
+        ]
+
+        result = pd.Series(equity[:, 0], index=portfolio.df.index, name=labels[0]) if is_scalar else pd.DataFrame(equity, index=portfolio.df.index, columns=labels)
+
+        return result, valid
     
     benchmark = benchmark.reindex(portfolio.df.index).pct_change().fillna(0).to_numpy()
 
