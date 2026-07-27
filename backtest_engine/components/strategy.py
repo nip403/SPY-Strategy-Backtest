@@ -4,6 +4,55 @@ import pandas as pd
 import numpy as np
 from .base import BacktestContext, StrategyComponent
 
+def resolve_positions(signals: np.ndarray) -> np.ndarray:
+    """
+    Sequentially resolve entry/exit/end-of-day signals into a held positions.
+    Due to path-dependency this cannot be vectorised.
+
+    Entry and exit conditions are price checks and not edge-triggered events.
+    Exits are therefore state dependent (depending if a position exists) and take priority.
+
+    A same-direction entry firing while already held is a no-op. An opposite-direction entry
+    firing while held is treated as a direct flip, taking priority over a plain stop-out.
+
+    signals : np.ndarray
+        Columns: long_entry, short_entry, long_exit, short_exit
+        Raw per-bar boolean signals.
+    end_of_day : np.ndarray
+        Boolean array, True on bars where any open position must be forced flat.
+
+    Returns np.ndarray
+        Resolved position (sign) per bar.
+    """
+
+    position = np.empty(len(signals))
+    state = 0
+
+    for i, s in enumerate(signals):
+        le, se, lx, sx, eod = s
+        
+        if eod:
+            state = 0
+        elif state > 0: # long
+            if se: # short flip
+                state = -1
+            elif lx: # exit
+                state = 0
+        elif state < 0: # short
+            if le: # long flip
+                state = 1
+            elif sx: # exit
+                state = 0
+        else: # entries
+            if le: 
+                state = 1
+            elif se:
+                state = -1
+
+        position[i] = state
+
+    return position
+
 class BaseStrategy(StrategyComponent):
     def set(self, df: pd.DataFrame, ctx: BacktestContext) -> pd.DataFrame:
         """
@@ -30,15 +79,7 @@ class BaseStrategy(StrategyComponent):
 
         end_of_day = df.index.time == pd.Timestamp("15:59").time()
 
-        df["position"] = np.nan
-
-        # set positions & backtest
-        df.loc[long_exit | short_exit, "position"] = 0
-        df.loc[long_entry, "position"] = 1
-        df.loc[short_entry, "position"] = -1
-        df.loc[end_of_day, "position"] = 0
-
-        df["position"] = df["position"].ffill().fillna(0) * (ctx.target_vol / df["std"]).clip(lower=-4, upper=4)
+        df["position"] = resolve_positions(np.asarray([long_entry, short_entry, long_exit, short_exit, end_of_day]).T) * (ctx.target_vol / df["std"]).clip(lower=-4, upper=4)
 
         return df
 
@@ -80,15 +121,7 @@ class RollingImmediateStopStrategy(StrategyComponent):
         short_exit = df["close"] > df["short_stop"]
         end_of_day = df.index.time == pd.Timestamp("15:59").time()
 
-        # set positions & backtest
-        df["position"] = np.nan
-
-        df.loc[long_exit | short_exit, "position"] = 0
-        df.loc[long_entry, "position"] = 1
-        df.loc[short_entry, "position"] = -1
-        df.loc[end_of_day, "position"] = 0
-
-        df["position"] = df["position"].ffill().fillna(0) * (ctx.target_vol / df["std"]).clip(lower=-4, upper=4)
+        df["position"] = resolve_positions(np.asarray([long_entry, short_entry, long_exit, short_exit, end_of_day]).T) * (ctx.target_vol / df["std"]).clip(lower=-4, upper=4)
 
         return df
 
@@ -133,15 +166,7 @@ class RollingIntervalStopStrategy(StrategyComponent):
         short_exit = (df["close"] > df["short_stop"]) & intervals
         end_of_day = df.index.time == pd.Timestamp("15:59").time()
 
-        # set positions & backtest
-        df["position"] = np.nan
-
-        df.loc[long_exit | short_exit, "position"] = 0
-        df.loc[long_entry, "position"] = 1
-        df.loc[short_entry, "position"] = -1
-        df.loc[end_of_day, "position"] = 0
-                
-        df["position"] = df["position"].ffill().fillna(0) * (ctx.target_vol / df["std"]).clip(lower=-4, upper=4)
+        df["position"] = resolve_positions(np.asarray([long_entry, short_entry, long_exit, short_exit, end_of_day]).T) * (ctx.target_vol / df["std"]).clip(lower=-4, upper=4)
 
         return df
 
@@ -170,13 +195,6 @@ class QuarterHourSampleStrategy(StrategyComponent):
 
         end_of_day = df.index.time == pd.Timestamp("15:59").time()
 
-        df["position"] = np.nan
-
-        df.loc[long_exit | short_exit, "position"] = 0
-        df.loc[long_entry, "position"] = 1
-        df.loc[short_entry, "position"] = -1
-        df.loc[end_of_day, "position"] = 0
-
-        df["position"] = df["position"].ffill().fillna(0) * (ctx.target_vol / df["std"]).clip(lower=-4, upper=4)
+        df["position"] = resolve_positions(np.asarray([long_entry, short_entry, long_exit, short_exit, end_of_day]).T) * (ctx.target_vol / df["std"]).clip(lower=-4, upper=4)
 
         return df

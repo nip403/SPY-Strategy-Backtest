@@ -76,8 +76,8 @@ def trade_stats(position: pd.Series, net_ret: pd.Series) -> pd.DataFrame:
     }, index=position.index)
 
 def generate_toy_returns(
-    periods: int, 
-    *, 
+    periods: int,
+    *,
     mean: float |np.ndarray = 0,
     std: float | np.ndarray = 1,
     distribution: Optional[Callable] = None,

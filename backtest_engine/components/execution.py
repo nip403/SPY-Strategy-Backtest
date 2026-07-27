@@ -53,9 +53,7 @@ class CappedVolumeRolloverExecution(ExecutionComponent):
         mask = target != target.shift(1)
         mask.iloc[0] = True
 
-        cache["rollover_target"] = target
-        cache["rollover_raw_capacity"] = raw_capacity
-        cache["rollover_regime"] = mask.cumsum()
+        cache["rollover"] = pd.DataFrame({"target": target, "raw_capacity": raw_capacity, "regime": mask.cumsum()})
 
         df["position"] = self.fill_matrix(np.array([ctx.aum]), cache)[:, 0]
 
@@ -77,11 +75,12 @@ class CappedVolumeRolloverExecution(ExecutionComponent):
 
         aum = np.asarray(aum, dtype=float)
 
-        target = cache["rollover_target"].to_numpy()
-        raw_capacity = cache["rollover_raw_capacity"].to_numpy()
+        rollover = cache["rollover"]
+        target = rollover["target"].to_numpy()
+        raw_capacity = rollover["raw_capacity"].to_numpy()
 
         # dense 0-indexed regime ids (robust to any gaps in the underlying regime numbering)
-        _, regime = np.unique(cache["rollover_regime"].to_numpy(), return_inverse=True)
+        _, regime = np.unique(rollover["regime"].to_numpy(), return_inverse=True)
 
         capacity = np.divide(raw_capacity[:, None], aum[None, :], out=np.zeros((len(raw_capacity), len(aum))), where=(aum[None, :] > 0))
         cum_cap = pd.DataFrame(capacity).groupby(regime).cumsum().to_numpy() # cumulative capacity per regime
@@ -153,9 +152,7 @@ class CappedVolumeExecution(ExecutionComponent):
         signal_mask = target != target.shift(1)
         signal_mask.iloc[0] = True
 
-        cache["ioc_target"] = target
-        cache["ioc_raw_capacity"] = raw_capacity
-        cache["ioc_signal"] = signal_mask
+        cache["ioc"] = pd.DataFrame({"target": target, "raw_capacity": raw_capacity, "signal": signal_mask})
 
         df["position"] = self.fill_matrix(np.array([ctx.aum]), cache)[:, 0]
 
@@ -181,10 +178,11 @@ class CappedVolumeExecution(ExecutionComponent):
 
         aum = np.asarray(aum, dtype=float)
 
-        signal_mask = cache["ioc_signal"].to_numpy()
+        ioc = cache["ioc"]
+        signal_mask = ioc["signal"].to_numpy()
 
-        targets = cache["ioc_target"].to_numpy()[signal_mask]
-        raw_caps = cache["ioc_raw_capacity"].to_numpy()[signal_mask, None]
+        targets = ioc["target"].to_numpy()[signal_mask]
+        raw_caps = ioc["raw_capacity"].to_numpy()[signal_mask, None]
 
         caps = np.divide(raw_caps, aum, out=np.zeros((len(raw_caps), len(aum))), where=(aum > 0))
 
@@ -200,4 +198,4 @@ class CappedVolumeExecution(ExecutionComponent):
         out = np.full((len(signal_mask), len(aum)), np.nan)
         out[signal_mask] = fills
 
-        return pd.DataFrame(out, index=cache["ioc_target"].index).ffill().to_numpy()
+        return pd.DataFrame(out, index=ioc.index).ffill().to_numpy()

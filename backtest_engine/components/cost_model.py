@@ -129,7 +129,7 @@ class DynamicCostModel(CostComponent):
         ctx : BacktestContext
             Shared portfolio parameters for the backtest run.
         cache : dict
-            This Portfolio's cache.
+            The Portfolio's cache.
 
         Returns pd.DataFrame
             df with "net_ret" added: returns after market impact and commission costs.
@@ -143,8 +143,7 @@ class DynamicCostModel(CostComponent):
 
         cache.setdefault("close", df["close"])
         cache.setdefault("volume", df["volume"])
-        cache["adv"] = adv
-        cache["ann_vol"] = ann_vol
+        cache["dynamic_cost"] = pd.DataFrame({"adv": adv, "ann_vol": ann_vol})
 
         position_matrix = df[["position"]].to_numpy()
         gross_matrix = df[["gross_ret"]].to_numpy()
@@ -221,8 +220,9 @@ class DynamicCostModel(CostComponent):
 
         close = cache["close"].to_numpy()[:, None]
         volume = cache["volume"].to_numpy()[:, None]
-        adv = cache["adv"].to_numpy()[:, None]
-        ann_vol = cache["ann_vol"].to_numpy()[:, None]
+        dynamic_cost = cache["dynamic_cost"]
+        adv = dynamic_cost["adv"].to_numpy()[:, None]
+        ann_vol = dynamic_cost["ann_vol"].to_numpy()[:, None]
 
         # common factors, failsafe set div by volume=0 scenarios to 0
         denom_adv = close * adv

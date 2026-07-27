@@ -37,6 +37,6 @@ Alpaca API credentials are required for live data pulls (`data.request`); cached
 - shared interface for analysis layer
 - data classes for analysis
 - fix optimiser from MVO
-- optimise pd -> np
+- optimise pd -> np/numba
 - out of sample testing
 - logging, maybe
