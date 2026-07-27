@@ -219,8 +219,15 @@ class StrategyConnector(AnalysisReport):
         strategy_weight = {"combined": float(self._naive_w), "optimised": float(self._opt_w)}
 
         non_bench = ["book", "strat"] + new_strats
-        total_aum_initial = {col: (self.portfolio.aum if col == "strat" else self.initial_book_cap) for col in non_bench}
-        total_aum_final = {col: total_aum_initial[col] * float(equity[col].iloc[-1]) for col in non_bench}
+        book_growth_initial = {col: (self.portfolio.aum if col == "strat" else self.initial_book_cap) for col in non_bench}
+        total_aum_final = {col: book_growth_initial[col] * float(equity[col].iloc[-1]) for col in non_bench}
+
+        # true pre-return starting capital for display; self.initial_book_cap already has the book's first-bar
+        # return compounded in (no anchor row precedes it), so look one bar further back in the book's raw history
+        # when available (falls back when the book has no lead-in data before the analysis window, e.g. synthetic data)
+        book_loc = self.book.index.get_loc(self.df.index[0])
+        display_book_cap = float(self.book.iloc[book_loc - 1]) if book_loc > 0 else self.initial_book_cap
+        total_aum_initial = {col: (self.portfolio.aum if col == "strat" else display_book_cap) for col in non_bench}
 
         strategy_aum_initial = {"combined": self._naive_w * self.initial_book_cap, "optimised": self._opt_w * self.initial_book_cap}
         strategy_aum_final = {col: total_aum_final[col] * strategy_weight[col] for col in new_strats}
@@ -315,28 +322,37 @@ class StrategyConnector(AnalysisReport):
         headers = ["Strategy", "Book", "Bench", "Combined", "Optimised"]
         col_keys = ["strat", "book", "bench", "combined", "optimised"]
 
+        cvar_mc_row = ("95% cVar (Monte Carlo)", [format_value(self.extras.cvar_monte_carlo.get(c), pct=True) for c in col_keys])
+
         main_groups = merge_groups(
             dataclass_rows([self.metrics[c] for c in col_keys], SeriesMetrics),
             dataclass_rows([self.relative[c] for c in col_keys], RelativeMetrics, default_section="Relative (vs Benchmark)"),
+            [("Risk", [cvar_mc_row])],
         )
-        main_table = render_sections(headers, main_groups)
 
-        # incremental: strategy/combined/optimised vs book
-        incr_headers = ["Strategy", "Combined", "Optimised"]
-        incr_keys = ["strat", "combined", "optimised"]
+        # incremental: strategy/combined/optimised vs book, aligned to the main table's columns
+        # correlation/market capture dropped (redundant with beta/r-squared), info ratio and tail dependency dropped (not incremental)
+        incr_instances = [self.incremental.get("strat"), None, None, self.incremental.get("combined"), self.incremental.get("optimised")]
+        incr_groups = dataclass_rows(incr_instances, RelativeMetrics, default_section="Incremental (vs Book)")
+        keep_labels = {"Alpha", "Beta", "R-Squared", "Idiosyncratic Risk"}
 
-        incr_groups = dataclass_rows([self.incremental[c] for c in incr_keys], RelativeMetrics)
-        incr_groups.append((None, [
-            ("Incremental Sharpe (Marginal)", [format_value(self.extras.incremental_sharpe_marginal), "-", "-"]),
-            ("Incremental Sharpe (Realised)", ["-", format_value(self.extras.incremental_sharpe_realised.get("combined")), format_value(self.extras.incremental_sharpe_realised.get("optimised"))]),
-        ]))
-        incremental_table = render_sections(incr_headers, incr_groups, show_header=False)
+        incremental_rows = [
+            row
+            for title, rows in incr_groups
+            if title == "Incremental (vs Book)"
+            for row in rows
+            if row[0] in keep_labels
+        ]
+
+        incremental_rows.append(("Incremental Sharpe (Marginal)", [format_value(self.extras.incremental_sharpe_marginal), "-", "-", "-", "-"]))
+        incremental_rows.append(("Incremental Sharpe (Realised)", ["-", "-", "-", format_value(self.extras.incremental_sharpe_realised.get("combined")), format_value(self.extras.incremental_sharpe_realised.get("optimised"))]))
 
         # remaining connector-only fields, aligned to the main table columns
-        extras_rows = []
+        other_rows = []
+        skip_fields = {"incremental_sharpe_marginal", "incremental_sharpe_realised", "cvar_monte_carlo"}
 
         for f in dataclasses.fields(ConnectorExtras):
-            if f.name in ("incremental_sharpe_marginal", "incremental_sharpe_realised"):
+            if f.name in skip_fields:
                 continue
 
             value = getattr(self.extras, f.name)
@@ -344,12 +360,8 @@ class StrategyConnector(AnalysisReport):
             pct = f.metadata.get("pct", False)
 
             values = [format_value(value.get(c), pct=pct) for c in col_keys] if isinstance(value, dict) else [format_value(value, pct=pct)] + ["-"] * (len(col_keys) - 1)
-            extras_rows.append((label, values))
+            other_rows.append((label, values))
 
-        extras_table = render_sections(headers, [(None, extras_rows)], show_header=False)
-
-        return (
-            "=== Portfolio Integration & Risk Report ===\n" + main_table
-            + "\n\n--- Incremental (vs Book) ---\n" + incremental_table
-            + "\n\n--- Additional Metrics ---\n" + extras_table
-        )
+        all_groups = main_groups + [("Incremental (vs Book)", incremental_rows), ("Other", other_rows)]
+        
+        return render_sections(headers, all_groups)

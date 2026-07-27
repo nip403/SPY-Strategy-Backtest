@@ -77,7 +77,7 @@ class DailySnapshot:
     bench_cum_return: float
 
     def __str__(self) -> str:
-        return f"Strategy: {format_value(self.strat_cum_return, pct=True)}   Benchmark: {format_value(self.bench_cum_return, pct=True)}"
+        return f"Strategy Return: {format_value(self.strat_cum_return, pct=True)}\nBenchmark Return: {format_value(self.bench_cum_return, pct=True)}"
 
 @dataclass
 class ConnectorExtras:
@@ -258,7 +258,7 @@ def format_value(value: Any, *, pct: bool = False, suffix: str = "") -> str:
         return f"{value:,}{suffix}"
 
     if isinstance(value, float):
-        return f"{value:.2f}{suffix}"
+        return f"{value:,.2f}{suffix}"
 
     return f"{value}{suffix}"
 
