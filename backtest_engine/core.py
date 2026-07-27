@@ -200,12 +200,29 @@ class Portfolio:
         sharpes = np.where(stds != 0, (means / stds) * np.sqrt(252 * 390), 0) # annualise from minutes
 
         base_sharpe = sharpes[np.argmin(np.abs(aum - base_aum))]
+        target_sharpe = base_sharpe * 0.5
+
+        # AUM at which the curve crosses target_sharpe, via log-aum interpolation (nan if it never does)
+        below = sharpes <= target_sharpe
+        if below.any() and not below.all():
+            idx = np.argmax(below)
+            if idx > 0:
+                x0, x1 = np.log10(aum[idx - 1]), np.log10(aum[idx])
+                y0, y1 = sharpes[idx - 1], sharpes[idx]
+                frac = (target_sharpe - y0) / (y1 - y0) if y1 != y0 else 0.0
+                crossing_aum = 10 ** (x0 + frac * (x1 - x0))
+            else:
+                crossing_aum = aum[idx]
+        else:
+            crossing_aum = float("nan")
+
+        fmt_aum = lambda x: f"{x:.0e}" if np.isfinite(x) else "N/A"
 
         fig, ax = plt.subplots(figsize=(12, 8))
 
         ax.plot(aum, sharpes, color="blue", label="Sharpe")
-        ax.axhline(base_sharpe, color="gray", linestyle="--", linewidth=1, label=f"Base Sharpe ({base_sharpe:.2f})")
-        ax.axhline(base_sharpe * 0.5, color="red", linestyle="--", linewidth=1, label=f"50% Base ({base_sharpe * 0.5:.2f})")
+        ax.axhline(base_sharpe, color="gray", linestyle="--", linewidth=1, label=f"Base Sharpe (SR: {base_sharpe:.2f}, AUM: {fmt_aum(base_aum)})")
+        ax.axhline(target_sharpe, color="red", linestyle="--", linewidth=1, label=f"50% Base (SR: {target_sharpe:.2f}, AUM: {fmt_aum(crossing_aum)})")
         ax.axhline(0, color="black", linestyle="-", linewidth=1, label="Risk Free")
 
         ax.set_xscale("log")
@@ -215,7 +232,8 @@ class Portfolio:
         ax.set_title(f"{cls.__name__} Capacity: Sharpe vs AUM", fontweight="bold")
 
         ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"${x:,.0f}"))
-        ax.legend()
+        ax.xaxis.set_minor_locator(ticker.NullLocator())  # only labelled powers-of-10 ticks (10k, 100k, ...) shown
+        ax.legend(loc="upper right")
 
         plt.tight_layout()
         plt.show()
@@ -394,10 +412,15 @@ class Portfolio:
             plt.tight_layout()
             plt.show()
 
-        return DailySnapshot(
+        snapshot = DailySnapshot(
             strat_cum_return=self.stats.loc[dt]["strat_ret"],
             bench_cum_return=self.stats.loc[dt]["bench_ret"], # includes overnight (i.e. from prev close)
         )
+
+        if plot:
+            print(snapshot)
+
+        return snapshot
 
     def __str__(self) -> str:
         """

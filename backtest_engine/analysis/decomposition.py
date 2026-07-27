@@ -8,7 +8,7 @@ import numpy as np
 from datetime import date
 from .base import AnalysisReport
 from .tearsheet import Tearsheet
-from .metrics import SeriesMetrics, TradeMetrics, RelativeMetrics, dataclass_rows, render_sections
+from .metrics import SeriesMetrics, TradeMetrics, RelativeMetrics, dataclass_rows, merge_groups, render_sections
 from ..utils import trade_stats, compute_drawdown
 
 class PortfolioDecomposer(AnalysisReport):
@@ -227,8 +227,10 @@ class PortfolioDecomposer(AnalysisReport):
 
         headers = ["Strategy", "Long-Only", "Short-Only", "Benchmark"]
 
-        groups = dataclass_rows([strat.strategy, long_.strategy, short.strategy, strat.benchmark], SeriesMetrics)
-        groups += dataclass_rows([strat.trades, long_.trades, short.trades, None], TradeMetrics, default_section="Trades")
-        groups += dataclass_rows([strat.relative, long_.relative, short.relative, None], RelativeMetrics, default_section="Relative (vs Benchmark)")
+        groups = merge_groups(
+            dataclass_rows([strat.strategy, long_.strategy, short.strategy, strat.benchmark], SeriesMetrics),
+            dataclass_rows([strat.trades, long_.trades, short.trades, None], TradeMetrics, default_section="Trades"),
+            dataclass_rows([strat.relative, long_.relative, short.relative, None], RelativeMetrics, default_section="Relative (vs Benchmark)"),
+        )
 
         return render_sections(headers, groups)

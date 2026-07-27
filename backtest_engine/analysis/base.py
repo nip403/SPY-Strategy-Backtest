@@ -8,7 +8,7 @@ class AnalysisReport(ABC):
     Shared interface for the analysis layer.
 
     Derived analytics classes compute eagerly inside __init__. report() always plots and
-    prints self, then returns self.
+    prints self.
     """
 
     def report(self) -> None:

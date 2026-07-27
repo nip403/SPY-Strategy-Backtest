@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 import warnings
 from .base import AnalysisReport
-from .metrics import SeriesMetrics, RelativeMetrics, ConnectorExtras, compute_series_metrics, compute_relative_metrics, format_value, dataclass_rows, render_sections
+from .metrics import SeriesMetrics, RelativeMetrics, ConnectorExtras, compute_series_metrics, compute_relative_metrics, format_value, dataclass_rows, merge_groups, render_sections
 from ..utils import compute_drawdown
 
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -315,8 +315,10 @@ class StrategyConnector(AnalysisReport):
         headers = ["Strategy", "Book", "Bench", "Combined", "Optimised"]
         col_keys = ["strat", "book", "bench", "combined", "optimised"]
 
-        main_groups = dataclass_rows([self.metrics[c] for c in col_keys], SeriesMetrics)
-        main_groups += dataclass_rows([self.relative[c] for c in col_keys], RelativeMetrics, default_section="Relative (vs Benchmark)")
+        main_groups = merge_groups(
+            dataclass_rows([self.metrics[c] for c in col_keys], SeriesMetrics),
+            dataclass_rows([self.relative[c] for c in col_keys], RelativeMetrics, default_section="Relative (vs Benchmark)"),
+        )
         main_table = render_sections(headers, main_groups)
 
         # incremental: strategy/combined/optimised vs book

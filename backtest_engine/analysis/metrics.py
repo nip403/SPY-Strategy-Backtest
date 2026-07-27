@@ -15,16 +15,18 @@ class SeriesMetrics:
     """
 
     total_days: int = field(metadata={"label": "Total Days"})
-    cum_return: float = field(metadata={"label": "Cum. Return", "pct": True})
-    ann_return: float = field(metadata={"label": "Ann. Return", "pct": True})  # geometric CAGR
-    avg_daily_return: float = field(metadata={"label": "Avg. Daily Return", "pct": True})  # arithmetic, not annualised
-    skew: float = field(metadata={"label": "Ret. Skew"})
-    kurt: float = field(metadata={"label": "Ret. Kurtosis"})
-    max_gain: float = field(metadata={"label": "Max Gain", "pct": True})
-    best_day: Any = field(metadata={"label": "Best Day"})
-    max_loss: float = field(metadata={"label": "Max Loss", "pct": True})
-    worst_day: Any = field(metadata={"label": "Worst Day"})
-    daily_win_rate: float = field(metadata={"label": "Daily Win Rate", "pct": True})
+
+    cum_return: float = field(metadata={"label": "Cum. Return", "pct": True, "section": "Return Profile"})
+    ann_return: float = field(metadata={"label": "Ann. Return", "pct": True, "section": "Return Profile"})  # geometric CAGR
+    avg_daily_return: float = field(metadata={"label": "Avg. Daily Return", "pct": True, "section": "Return Profile"})  # arithmetic, not annualised
+    skew: float = field(metadata={"label": "Ret. Skew", "section": "Return Profile"})
+    kurt: float = field(metadata={"label": "Ret. Kurtosis", "section": "Return Profile"})
+
+    max_gain: float = field(metadata={"label": "Max Gain", "pct": True, "section": "Trades"})
+    max_loss: float = field(metadata={"label": "Max Loss", "pct": True, "section": "Trades"})
+    best_day: Any = field(metadata={"label": "Best Day", "section": "Trades"})
+    worst_day: Any = field(metadata={"label": "Worst Day", "section": "Trades"})
+    daily_win_rate: float = field(metadata={"label": "Daily Win Rate", "pct": True, "section": "Trades"})
 
     max_drawdown: float = field(metadata={"label": "Max Drawdown", "pct": True, "section": "Drawdowns"})
     max_dd_days: int = field(metadata={"label": "Max DD Days", "suffix": " Days", "section": "Drawdowns"})
@@ -32,7 +34,7 @@ class SeriesMetrics:
 
     ann_vol: float = field(metadata={"label": "Ann. Volatility", "pct": True, "section": "Risk"})
     var_95pct: float = field(metadata={"label": "95% VaR", "pct": True, "section": "Risk"})
-    cvar: float = field(metadata={"label": "Expected Shortfall", "section": "Risk"})
+    cvar: float = field(metadata={"label": "Expected Shortfall", "pct": True, "section": "Risk"})
 
     sharpe_ratio: float = field(metadata={"label": "Sharpe Ratio", "section": "Ratios"})
     sortino_ratio: float = field(metadata={"label": "Sortino Ratio", "section": "Ratios"})
@@ -46,7 +48,7 @@ class TradeMetrics:
 
     win_rate: float = field(metadata={"label": "Win Rate", "pct": True})
     trades_per_day: float = field(metadata={"label": "Average Trades / Day"})
-    return_per_trade: float = field(metadata={"label": "Average Return / Trade"})
+    return_per_trade: float = field(metadata={"label": "Average Return / Trade", "pct": True})
     total_trades: int = field(metadata={"label": "Total Trades"})
 
 @dataclass
@@ -58,14 +60,14 @@ class RelativeMetrics:
     alpha: float = field(metadata={"label": "Alpha"})
     beta: float = field(metadata={"label": "Beta"})
     r_squared: float = field(metadata={"label": "R-Squared"})
-    information_ratio: float = field(metadata={"label": "Information Ratio"})
+    information_ratio: float = field(metadata={"label": "Information Ratio", "section": "Ratios"})
     idiosyncratic_risk: float = field(metadata={"label": "Idiosyncratic Risk", "pct": True})  # residual vol after removing beta*reference + alpha/252
 
     correlation: float = field(metadata={"label": "Correlation"})
     up_market_capture: float = field(metadata={"label": "Up-Market Capture"})
     down_market_capture: float = field(metadata={"label": "Down-Market Capture"})
-    lower_tail_dependency: float = field(metadata={"label": "Lower Tail Dependency"})
-    upper_tail_dependency: float = field(metadata={"label": "Upper Tail Dependency"})
+    lower_tail_dependency: float = field(metadata={"label": "Lower Tail Dependency", "section": "Risk"})
+    upper_tail_dependency: float = field(metadata={"label": "Upper Tail Dependency", "section": "Risk"})
 
 @dataclass
 class DailySnapshot:
@@ -296,6 +298,30 @@ def dataclass_rows(instances: list[Optional[Any]], reference_cls: type, *, defau
         groups[-1][1].append((label, values))
 
     return groups
+
+def merge_groups(*group_lists: list[tuple[Optional[str], list[tuple[str, list[str]]]]]) -> list[tuple[Optional[str], list[tuple[str, list[str]]]]]:
+    """
+    Merge groups from multiple dataclass_rows() calls, combining sections into blocks.
+
+    group_lists : list[tuple[Optional[str], list[tuple[str, list[str]]]]]
+        Any number of dataclass_rows() outputs, in the order they should be merged.
+
+    Returns list[tuple[Optional[str], list[tuple[str, list[str]]]]]
+        Combined (section_title, rows) groups, ready for render_sections.
+    """
+
+    order: list[Optional[str]] = []
+    bucket: dict[Optional[str], list] = {}
+
+    for groups in group_lists:
+        for title, rows in groups:
+            if title not in bucket:
+                order.append(title)
+                bucket[title] = []
+
+            bucket[title].extend(rows)
+
+    return [(title, bucket[title]) for title in order]
 
 def render_sections(headers: list[str], groups: list[tuple[Optional[str], list[tuple[str, list[str]]]]], *, show_header: bool = True) -> str:
     """
