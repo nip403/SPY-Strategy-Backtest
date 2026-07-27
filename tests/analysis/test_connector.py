@@ -72,12 +72,22 @@ def test_cvar_monte_carlo_seeded_reproducible_across_runs(portfolio_factory):
 
 # ---- plot / str / report ------------------------------------------------
 
-def test_plot_returns_single_figure(connector):
+def test_plot_creates_single_figure(connector):
     figs_before = len(plt.get_fignums())
-    figs = connector.plot()
+    connector.plot()
 
-    assert len(figs) == 1
     assert len(plt.get_fignums()) == figs_before + 1
+
+def test_plot_savepath_saves_and_closes_figure(connector, tmp_path):
+    figs_before = len(plt.get_fignums())
+    connector.plot(savepath=tmp_path)
+
+    assert len(plt.get_fignums()) == figs_before
+
+    created = list(tmp_path.iterdir())
+    assert len(created) == 1
+    assert created[0].name.startswith("StrategyConnector_")
+    assert (created[0] / "integration_overview.png").exists()
 
 def test_str_contains_all_five_columns(connector):
     text = str(connector)

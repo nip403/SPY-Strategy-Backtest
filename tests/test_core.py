@@ -208,6 +208,54 @@ def test_report_day_plot_false_prints_nothing(portfolio_factory):
 
     assert buf.getvalue() == ""
 
+# ---- savepath --------------------------------------------------------
+
+def test_report_period_mode_savepath_saves_two_sibling_directories_and_closes_figures(portfolio_factory, tmp_path):
+    p = portfolio_factory()
+
+    figs_before = len(plt.get_fignums())
+    p.report(plot=True, savepath=tmp_path)
+
+    assert len(plt.get_fignums()) == figs_before
+
+    created = sorted(p.name for p in tmp_path.iterdir())
+    assert len(created) == 2
+    assert created[0].startswith("Portfolio_")
+    assert created[1].startswith("Tearsheet_")
+
+def test_report_decompose_mode_savepath_saves_decomposer_directory_only(portfolio_factory, tmp_path):
+    p = portfolio_factory()
+
+    figs_before = len(plt.get_fignums())
+    p.report(decompose=True, plot=True, savepath=tmp_path)
+
+    assert len(plt.get_fignums()) == figs_before
+
+    created = list(tmp_path.iterdir())
+    assert len(created) == 1
+    assert created[0].name.startswith("PortfolioDecomposer_")
+
+def test_report_day_mode_savepath_saves_and_closes_figure(portfolio_factory, tmp_path):
+    p = portfolio_factory()
+
+    figs_before = len(plt.get_fignums())
+    p.report(day=p.t0, plot=True, savepath=tmp_path)
+
+    assert len(plt.get_fignums()) == figs_before
+
+    created = list(tmp_path.iterdir())
+    assert len(created) == 1
+    assert created[0].name.startswith("Portfolio_")
+    assert (created[0] / "noise_area_and_leverage.png").exists()
+
+def test_report_savepath_none_leaves_figures_open(portfolio_factory):
+    p = portfolio_factory()
+
+    figs_before = len(plt.get_fignums())
+    p.report(plot=True, savepath=None)
+
+    assert len(plt.get_fignums()) == figs_before + 2
+
 # ---- __str__ --------------------------------------------------------
 
 def test_str_contains_aum_sharpe_and_period(portfolio_factory):
@@ -289,3 +337,24 @@ class TestSharpeCurve:
         assert ax.get_xlabel() == "AUM ($, Piecewise-Linear-Scaled)"
         assert ax.get_ylabel() == "Sharpe Ratio"
         assert "Capacity: Sharpe vs AUM" in ax.get_title()
+
+    def test_savepath_saves_and_closes_figure(self, synthetic_ohlcv, cycling_strategy, tmp_path):
+        df = synthetic_ohlcv(n_days=20)
+
+        figs_before = len(plt.get_fignums())
+        Portfolio.sharpe_curve(df=df, strategy_model=cycling_strategy, min_aum=1e4, max_aum=1e8, resolution=5, savepath=tmp_path)
+
+        assert len(plt.get_fignums()) == figs_before
+
+        created = list(tmp_path.iterdir())
+        assert len(created) == 1
+        assert created[0].name.startswith("Portfolio_")
+        assert (created[0] / "sharpe_capacity_curve.png").exists()
+
+    def test_savepath_none_leaves_figure_open(self, synthetic_ohlcv, cycling_strategy):
+        df = synthetic_ohlcv(n_days=20)
+
+        figs_before = len(plt.get_fignums())
+        Portfolio.sharpe_curve(df=df, strategy_model=cycling_strategy, min_aum=1e4, max_aum=1e8, resolution=5)
+
+        assert len(plt.get_fignums()) == figs_before + 1

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from datetime import date
+import re
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
 
 from backtest_engine.utils import (
     round_date, compute_drawdown, trade_stats, _safe_div,
-    generate_toy_returns, generate_toy_equity,
+    generate_toy_returns, generate_toy_equity, save_figures,
 )
 
 # ---- round_date --------------------------------------------------------
@@ -93,6 +95,40 @@ def test_safe_div_zero_denominator_returns_nan():
 
 def test_safe_div_nonzero_denominator_returns_value():
     assert _safe_div(10.0, 4.0) == 2.5
+
+# ---- save_figures --------------------------------------------------------
+
+def test_save_figures_creates_classname_timestamped_directory(tmp_path):
+    fig = plt.figure()
+
+    out_dir = save_figures({"a_chart": fig}, "SomeClass", tmp_path)
+
+    assert out_dir.parent == tmp_path
+    assert out_dir.is_dir()
+    assert re.match(r"^SomeClass_\d{8}_\d{6}_\d{6}$", out_dir.name)
+
+def test_save_figures_writes_one_file_per_descriptive_name(tmp_path):
+    fig1, fig2 = plt.figure(), plt.figure()
+
+    out_dir = save_figures({"first_chart": fig1, "second_chart": fig2}, "SomeClass", tmp_path)
+
+    assert sorted(p.name for p in out_dir.iterdir()) == ["first_chart.png", "second_chart.png"]
+    assert all(p.stat().st_size > 0 for p in out_dir.iterdir())
+
+def test_save_figures_closes_figures_after_saving(tmp_path):
+    fig = plt.figure()
+    fignum = fig.number
+
+    save_figures({"a_chart": fig}, "SomeClass", tmp_path)
+
+    assert fignum not in plt.get_fignums()
+
+def test_save_figures_returns_created_directory(tmp_path):
+    fig = plt.figure()
+
+    out_dir = save_figures({"a_chart": fig}, "SomeClass", tmp_path)
+
+    assert (out_dir / "a_chart.png").exists()
 
 # ---- generate_toy_returns --------------------------------------------------
 

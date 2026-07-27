@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-import matplotlib.pyplot as plt
+from pathlib import Path
+from typing import Optional
 
 class AnalysisReport(ABC):
     """
@@ -11,21 +12,27 @@ class AnalysisReport(ABC):
     prints self.
     """
 
-    def report(self) -> None:
+    def report(self, *, savepath: Optional[str | Path] = None) -> None:
         """
         Display the report: plot figures and print metric table.
+
+        savepath : Optional[str | Path] = None
+            If given, this run's figures are saved under a new f"{ClassName}_{timestamp}"
+            directory inside savepath, then closed. Figures still display either way.
         """
 
-        self.plot()
+        self.plot(savepath=savepath)
         print(self)
 
     @abstractmethod
-    def plot(self) -> list[plt.Figure]:
+    def plot(self, *, savepath: Optional[str | Path] = None) -> None:
         """
-        Build, show, and return this report's figures.
-        """
+        Build and show this report's figures.
 
-        return []
+        savepath : Optional[str | Path] = None
+            If given, this run's figures are saved under a new f"{ClassName}_{timestamp}"
+            directory inside savepath, then closed. Figures still display either way.
+        """
 
     @abstractmethod
     def __str__(self) -> str:

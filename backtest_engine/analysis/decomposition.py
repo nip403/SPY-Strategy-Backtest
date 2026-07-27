@@ -6,10 +6,12 @@ import matplotlib.ticker as ticker
 import pandas as pd
 import numpy as np
 from datetime import date
+from pathlib import Path
+from typing import Optional
 from .base import AnalysisReport
 from .tearsheet import Tearsheet
 from .metrics import SeriesMetrics, TradeMetrics, RelativeMetrics, dataclass_rows, merge_groups, render_sections
-from ..utils import trade_stats, compute_drawdown
+from ..utils import trade_stats, compute_drawdown, save_figures
 
 class PortfolioDecomposer(AnalysisReport):
     def __init__(self, portfolio: Portfolio, start_date: date, end_date: date) -> None:
@@ -95,7 +97,7 @@ class PortfolioDecomposer(AnalysisReport):
             }
         )
 
-    def plot(self) -> list[plt.Figure]:
+    def plot(self, *, savepath: Optional[str | Path] = None) -> None:
         """
         Plot portfolio component performance distributions.
         Displays cumulative equity curves and returns histograms.
@@ -103,8 +105,9 @@ class PortfolioDecomposer(AnalysisReport):
         The KDE plot converts each return histogram into a smooth density curve.
         This allows multiple distributions to be compared on a single chart without too much visual clutter.
 
-        Returns list[plt.Figure]
-            The generated figures.
+        savepath : Optional[str | Path] = None
+            If given, this run's figures are saved under a new f"{ClassName}_{timestamp}"
+            directory inside savepath, then closed. Still displayed either way.
         """
 
         ret = self._plot_data
@@ -213,7 +216,8 @@ class PortfolioDecomposer(AnalysisReport):
 
         plt.show()
 
-        return [fig1, fig2]
+        if savepath is not None:
+            save_figures({"equity_curves": fig1, "returns_distributions": fig2}, type(self).__name__, savepath)
 
     def __str__(self) -> str:
         """

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import dataclasses
+from pathlib import Path
+from typing import Optional
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import warnings
 from .base import AnalysisReport
 from .metrics import SeriesMetrics, RelativeMetrics, ConnectorExtras, compute_series_metrics, compute_relative_metrics, format_value, dataclass_rows, merge_groups, render_sections
-from ..utils import compute_drawdown
+from ..utils import compute_drawdown, save_figures
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -245,12 +247,13 @@ class StrategyConnector(AnalysisReport):
             strategy_aum_final=strategy_aum_final,
         )
 
-    def plot(self) -> list[plt.Figure]:
+    def plot(self, *, savepath: Optional[str | Path] = None) -> None:
         """
         Plot cumulative equity, rolling Sharpe ratio, strategy correlation, and beta.
 
-        Returns list[plt.Figure]
-            The generated figure.
+        savepath : Optional[str | Path] = None
+            If given, this run's figure is saved under a new f"{ClassName}_{timestamp}"
+            directory inside savepath, then closed. Still displayed either way.
         """
 
         fig, axes = plt.subplots(
@@ -309,7 +312,8 @@ class StrategyConnector(AnalysisReport):
         plt.tight_layout()
         plt.show()
 
-        return [fig]
+        if savepath is not None:
+            save_figures({"integration_overview": fig}, type(self).__name__, savepath)
 
     def __str__(self) -> str:
         """

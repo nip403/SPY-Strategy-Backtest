@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Optional
 import matplotlib.pyplot as plt
 import pandas as pd
 from .base import AnalysisReport
 from .metrics import SeriesMetrics, TradeMetrics, RelativeMetrics, compute_series_metrics, compute_trade_metrics, compute_relative_metrics, dataclass_rows, merge_groups, render_sections
+from ..utils import save_figures
 
 class Tearsheet(AnalysisReport):
     def __init__(self, df: pd.DataFrame) -> None:
@@ -22,12 +25,13 @@ class Tearsheet(AnalysisReport):
         self.trades = compute_trade_metrics(df["trade_count"], df["trade_wins"], self.strategy.cum_return)
         self.relative = compute_relative_metrics(df["strat_ret"], df["bench_ret"])
 
-    def plot(self) -> list[plt.Figure]:
+    def plot(self, *, savepath: Optional[str | Path] = None) -> None:
         """
         Plot daily return distributions for strategy and benchmark.
 
-        Returns list[plt.Figure]
-            The generated figure.
+        savepath : Optional[str | Path] = None
+            If given, this run's figure is saved under a new f"{ClassName}_{timestamp}"
+            directory inside savepath, then closed. Still displayed either way.
         """
 
         ret = self._ret
@@ -71,7 +75,8 @@ class Tearsheet(AnalysisReport):
         plt.tight_layout()
         plt.show()
 
-        return [fig]
+        if savepath is not None:
+            save_figures({"daily_returns_distribution": fig}, type(self).__name__, savepath)
 
     def __str__(self) -> str:
         """

@@ -7,9 +7,10 @@ from matplotlib import dates as mdates
 import pandas as pd
 import numpy as np
 from datetime import date
+from pathlib import Path
 from typing import Optional, Any
 
-from .utils import round_date, trade_stats, compute_drawdown
+from .utils import round_date, trade_stats, compute_drawdown, save_figures
 from .analysis.metrics import DailySnapshot
 from .analysis.tearsheet import Tearsheet
 from .analysis.decomposition import PortfolioDecomposer
@@ -170,7 +171,7 @@ class Portfolio:
         return self.cost_model.returns_matrix(aum, position_matrix, gross_matrix, self.cache)
 
     @classmethod
-    def sharpe_curve(cls, df: pd.DataFrame, min_aum: int = 1e4, max_aum: int = 1e12 , base_aum: int = None, resolution: int = 9, **kwargs: Any) -> None:
+    def sharpe_curve(cls, df: pd.DataFrame, min_aum: int = 1e4, max_aum: int = 1e12 , base_aum: int = None, resolution: int = 9, *, savepath: Optional[str | Path] = None, **kwargs: Any) -> None:
         """
         Plot strategy Sharpe ratio across different portfolio capacities.
 
@@ -183,11 +184,14 @@ class Portfolio:
         base_aum : int = None
             Reference portfolio size used for comparison.
         resolution : int = 9
-            Number of candidate portfolios generated per power-of-10-AUM (not inclusive). 
+            Number of candidate portfolios generated per power-of-10-AUM (not inclusive).
             Higher values increase plot smoothness at the severe cost of memory (up to GBs of RAM).
+        savepath : Optional[str | Path] = None
+            If given, this run's figure is saved under a new f"{ClassName}_{timestamp}"
+            directory inside savepath, then closed. Still displayed either way.
         **kwargs : Any
             Additional parameters passed to instantiate the class during construction.
-            Can include strategy=/execution=/cost_model= to evaluate a specific composition.
+            Can include strategy_model=/execution_model=/cost_model= to evaluate a specific composition.
         """
 
         base_aum = min_aum if base_aum is None else np.clip(base_aum, min_aum, max_aum)
@@ -230,6 +234,9 @@ class Portfolio:
 
         plt.tight_layout()
         plt.show()
+
+        if savepath is not None:
+            save_figures({"sharpe_capacity_curve": fig}, cls.__name__, savepath)
 
     def _aggregate(self) -> pd.DataFrame:
         """
@@ -279,7 +286,7 @@ class Portfolio:
 
         return float((r := self.stats["strat_ret"]).mean() / r.std() * 252**0.5)
 
-    def report(self, *, day: Optional[date] = None, start: Optional[date] = None, end: Optional[date] = None, plot: bool = True, decompose: bool = False) -> Tearsheet | PortfolioDecomposer | DailySnapshot:
+    def report(self, *, day: Optional[date] = None, start: Optional[date] = None, end: Optional[date] = None, plot: bool = True, decompose: bool = False, savepath: Optional[str | Path] = None) -> Tearsheet | PortfolioDecomposer | DailySnapshot:
         """
         Generate a portfolio performance report.
         Supports analysis for a single-day slice, period performance, and optional portfolio decomposition into long/short.
@@ -294,13 +301,19 @@ class Portfolio:
             Whether to display performance charts.
         decompose : bool = False
             Whether to return portfolio decomposition analysis instead of a Tearsheet.
+        savepath : Optional[str | Path] = None
+            If given, each figure produced by this call is saved under its own new
+            f"{ClassName}_{timestamp}" directory inside savepath, then closed. Still displayed
+            either way. A period-mode call can produce two sibling directories: one for this
+            method's own equity chart ("Portfolio_...") and one from the delegated
+            Tearsheet/PortfolioDecomposer report ("Tearsheet_..."/"PortfolioDecomposer_...").
 
         Returns Tearsheet | PortfolioDecomposer
             Performance report or decomposition object.
         """
 
         if day is not None:
-            return self._daily_result(round_date(self.df.index, day), plot=plot)
+            return self._daily_result(round_date(self.df.index, day), plot=plot, savepath=savepath)
 
         start = round_date(self.df.index, start) if start is not None else self.t0
         end = round_date(self.df.index, end) if end is not None else self.t1
@@ -312,7 +325,7 @@ class Portfolio:
         bench = sliced["bench_equity"]
 
         if plot and not decompose:
-            plt.figure(figsize=(14, 8))
+            fig = plt.figure(figsize=(14, 8))
 
             plt.plot(strategy.index, strategy.values, color="blue", label="Strategy")
             plt.plot(bench.index, bench.values, color="red", label="SPY")
@@ -331,17 +344,20 @@ class Portfolio:
             plt.title(f"Strategy Performance ({start} - {end})", fontweight="bold")
             plt.show()
 
+            if savepath is not None:
+                save_figures({"equity_curve": fig}, type(self).__name__, savepath)
+
         sliced = self.stats[start:end].copy()
         sliced[["strat_equity", "bench_equity"]] *= self.aum / sliced[["strat_equity", "bench_equity"]].iloc[0].values
 
         result = Tearsheet(sliced) if not decompose else PortfolioDecomposer(self, start, end)
-        
+
         if plot:
-            result.report()
+            result.report(savepath=savepath)
 
         return result
 
-    def _daily_result(self, dt: date, plot: bool) -> DailySnapshot:
+    def _daily_result(self, dt: date, plot: bool, savepath: Optional[str | Path] = None) -> DailySnapshot:
         """
         Internal (strategy-specific) method to generate an intraday analysis for a single trading day.
 
@@ -349,6 +365,9 @@ class Portfolio:
             Trading date to analyse.
         plot : bool
             Whether to display intraday charts.
+        savepath : Optional[str | Path] = None
+            If given, this run's figure is saved under a new f"{ClassName}_{timestamp}"
+            directory inside savepath, then closed. Still displayed either way.
 
         Returns Tearsheet
             Daily performance summary.
@@ -404,6 +423,9 @@ class Portfolio:
             plt.suptitle(f"Strategy Performance ({dt})", fontweight="bold")
             plt.tight_layout()
             plt.show()
+
+            if savepath is not None:
+                save_figures({"noise_area_and_leverage": fig}, type(self).__name__, savepath)
 
         snapshot = DailySnapshot(
             strat_cum_return=self.stats.loc[dt]["strat_ret"],

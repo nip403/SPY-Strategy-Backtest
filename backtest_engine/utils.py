@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from scipy.optimize import newton
+import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import random
-from datetime import date
+from datetime import date, datetime
+from pathlib import Path
 import warnings
 from typing import Callable, Optional, overload
 
@@ -92,6 +94,30 @@ def trade_stats(position: pd.Series, net_ret: pd.Series) -> pd.DataFrame:
     
 def _safe_div(num: float, denom: float) -> float:
     return num / denom if denom else float("nan")
+
+def save_figures(figs: dict[str, plt.Figure], classname: str, savepath: str | Path) -> Path:
+    """
+    Save a batch of figures from one report()/plot() run to disk, then close them.
+
+    figs : dict[str, plt.Figure]
+        Maps a descriptive filename stem (no extension) to its figure.
+    classname : str
+        Name of the class that produced these figures, used as the output directory's prefix.
+    savepath : str | Path
+        Base directory under which a new f"{classname}_{timestamp}" directory is created.
+
+    Returns Path
+        The created directory containing the saved figures.
+    """
+
+    out_dir = Path(savepath) / f"{classname}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for name, fig in figs.items():
+        fig.savefig(out_dir / f"{name}.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+    return out_dir
 
 def generate_toy_returns(
     periods: int,

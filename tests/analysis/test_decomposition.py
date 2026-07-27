@@ -41,12 +41,22 @@ def test_long_short_split_correctly_isolates_exposure(portfolio_factory):
     assert decomp.components["short"].trades.total_trades == 0
     assert decomp.components["long"].trades.total_trades > 0
 
-def test_plot_returns_two_figures(decomposer):
+def test_plot_creates_two_figures(decomposer):
     figs_before = len(plt.get_fignums())
-    figs = decomposer.plot()
+    decomposer.plot()
 
-    assert len(figs) == 2
     assert len(plt.get_fignums()) == figs_before + 2
+
+def test_plot_savepath_saves_and_closes_figures(decomposer, tmp_path):
+    figs_before = len(plt.get_fignums())
+    decomposer.plot(savepath=tmp_path)
+
+    assert len(plt.get_fignums()) == figs_before
+
+    created = list(tmp_path.iterdir())
+    assert len(created) == 1
+    assert created[0].name.startswith("PortfolioDecomposer_")
+    assert sorted(p.name for p in created[0].iterdir()) == ["equity_curves.png", "returns_distributions.png"]
 
 def test_str_reports_four_columns_and_no_stale_label_typo(decomposer):
     text = str(decomposer)
