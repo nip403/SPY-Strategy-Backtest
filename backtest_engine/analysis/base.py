@@ -13,9 +13,9 @@ class AnalysisReport(ABC):
 
     def report(self) -> None:
         """
-        Display this report: plot figures and print metric table.
+        Display the report: plot figures and print metric table.
         """
-        
+
         self.plot()
         print(self)
 

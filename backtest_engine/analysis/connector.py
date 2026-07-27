@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 import warnings
 from .base import AnalysisReport
-from .metrics import SeriesMetrics, RelativeMetrics, ConnectorExtras, compute_series_metrics, compute_relative_metrics, format_value, render_table
+from .metrics import SeriesMetrics, RelativeMetrics, ConnectorExtras, compute_series_metrics, compute_relative_metrics, format_value, dataclass_rows, render_sections
 from ..utils import compute_drawdown
 
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -192,44 +192,29 @@ class StrategyConnector(AnalysisReport):
     def _generate_report(self) -> None:
         """
         Generate portfolio integration and risk metrics.
-        Common statistics are computed in the shared metrics layer like Tearsheet(), so results are directly comparable. 
         """
 
         columns = list(self.daily.columns)  # ["strat", "book", "bench", "combined", "optimised"]
         new_strats = ["combined", "optimised"]
+        incremental_cols = ["strat"] + new_strats
         equity = (1 + self.daily).cumprod()
 
         self.metrics = {col: compute_series_metrics(self.daily[col], compute_drawdown(equity[col])) for col in columns}
         self.relative = {col: compute_relative_metrics(self.daily[col], self.daily["bench"]) for col in columns}
-        self.incremental = {col: compute_relative_metrics(self.daily[col], self.daily["book"]) for col in new_strats}
+        self.incremental = {col: compute_relative_metrics(self.daily[col], self.daily["book"]) for col in incremental_cols}  # vs book, not bench
 
-        s = self.daily[["strat"] + new_strats]
+        s = self.daily[incremental_cols]
         b = self.daily["book"]
 
-        # drawdown recovery - needs the full frame at once for vectorised trough-finding
-        drawdowns = equity / equity.cummax() - 1
-        trough_rows = drawdowns.values.argmin(axis=0)
-        rows_idx = np.arange(len(drawdowns))[:, None]
-        recovery_rows = np.where((rows_idx >= trough_rows) & np.isclose(drawdowns.values, 0), rows_idx, np.inf).min(axis=0)
-        recovery_days = np.where(np.isinf(recovery_rows), len(drawdowns), recovery_rows) - trough_rows
-        max_dd_recovery_days = {col: int(v) for col, v in zip(columns, recovery_days)}
-
-        correlation_to_book = s.corrwith(b).to_dict()
         crash_correlation_to_book = s[b <= b.quantile(0.10)].corrwith(b[b <= b.quantile(0.10)]).to_dict()
         intraday_correlation_to_book = float(self.df[["strat", "book"]].groupby(self.df.index.date).corr().iloc[0::2, -1].mean()) # very cursed slicing due to output of corr
 
-        incremental_sharpe_marginal = float(self.metrics["strat"].sharpe_ratio - correlation_to_book["strat"] * self.metrics["book"].sharpe_ratio) # sharpe heuristic: SRnew > SRold * corr
+        incremental_sharpe_marginal = float(self.metrics["strat"].sharpe_ratio - self.incremental["strat"].correlation * self.metrics["book"].sharpe_ratio) # sharpe heuristic: SRnew > SRold * corr
         incremental_sharpe_realised = {col: float(self.metrics[col].sharpe_ratio - self.metrics["book"].sharpe_ratio) for col in new_strats}
-
-        lower_tail_dependency = (((s <= s.quantile(0.10)).mul(b <= b.quantile(0.10), axis=0)).sum() / (b <= b.quantile(0.10)).sum()).to_dict()
-        upper_tail_dependency = (((s >= s.quantile(0.90)).mul(b >= b.quantile(0.90), axis=0)).sum() / (b >= b.quantile(0.90)).sum()).to_dict()
 
         mc_sample = np.random.default_rng(42).integers(0, len(self.daily), size=(10000, 252))
         cvar_mc = np.sort(self.daily.values[mc_sample], axis=1)[:, :12, :].mean(axis=(0, 1))
         cvar_monte_carlo = dict(zip(columns, cvar_mc.tolist()))
-
-        up_market_capture = (self.daily[self.daily["bench"] > 0].mean() / self.daily.loc[self.daily["bench"] > 0, "bench"].mean()).to_dict()
-        down_market_capture = (self.daily[self.daily["bench"] < 0].mean() / self.daily.loc[self.daily["bench"] < 0, "bench"].mean()).to_dict()
 
         strategy_weight = {"combined": float(self._naive_w), "optimised": float(self._opt_w)}
 
@@ -241,17 +226,11 @@ class StrategyConnector(AnalysisReport):
         strategy_aum_final = {col: total_aum_final[col] * strategy_weight[col] for col in new_strats}
 
         self.extras = ConnectorExtras(
-            max_dd_recovery_days=max_dd_recovery_days,
-            correlation_to_book=correlation_to_book,
             crash_correlation_to_book=crash_correlation_to_book,
             intraday_correlation_to_book=intraday_correlation_to_book,
             incremental_sharpe_marginal=incremental_sharpe_marginal,
             incremental_sharpe_realised=incremental_sharpe_realised,
-            lower_tail_dependency=lower_tail_dependency,
-            upper_tail_dependency=upper_tail_dependency,
             cvar_monte_carlo=cvar_monte_carlo,
-            up_market_capture=up_market_capture,
-            down_market_capture=down_market_capture,
             strategy_weight=strategy_weight,
             total_aum_initial=total_aum_initial,
             total_aum_final=total_aum_final,
@@ -336,40 +315,39 @@ class StrategyConnector(AnalysisReport):
         headers = ["Strategy", "Book", "Bench", "Combined", "Optimised"]
         col_keys = ["strat", "book", "bench", "combined", "optimised"]
 
-        rows = []
+        main_groups = dataclass_rows([self.metrics[c] for c in col_keys], SeriesMetrics)
+        main_groups += dataclass_rows([self.relative[c] for c in col_keys], RelativeMetrics, default_section="Relative (vs Benchmark)")
+        main_table = render_sections(headers, main_groups)
 
-        for f in dataclasses.fields(SeriesMetrics):
-            label, pct, suffix = f.metadata.get("label", f.name), f.metadata.get("pct", False), f.metadata.get("suffix", "")
-            rows.append((label, pct, suffix, [getattr(self.metrics[c], f.name) for c in col_keys]))
+        # incremental: strategy/combined/optimised vs book
+        incr_headers = ["Strategy", "Combined", "Optimised"]
+        incr_keys = ["strat", "combined", "optimised"]
 
-        for f in dataclasses.fields(RelativeMetrics):
-            label, pct, suffix = f.metadata.get("label", f.name), f.metadata.get("pct", False), f.metadata.get("suffix", "")
-            rows.append((label, pct, suffix, [getattr(self.relative[c], f.name) for c in col_keys]))
+        incr_groups = dataclass_rows([self.incremental[c] for c in incr_keys], RelativeMetrics)
+        incr_groups.append((None, [
+            ("Incremental Sharpe (Marginal)", [format_value(self.extras.incremental_sharpe_marginal), "-", "-"]),
+            ("Incremental Sharpe (Realised)", ["-", format_value(self.extras.incremental_sharpe_realised.get("combined")), format_value(self.extras.incremental_sharpe_realised.get("optimised"))]),
+        ]))
+        incremental_table = render_sections(incr_headers, incr_groups, show_header=False)
 
-        sections = [render_table(headers, rows, title="=== Portfolio Integration & Risk Report ===")]
+        # remaining connector-only fields, aligned to the main table columns
+        extras_rows = []
 
-        incr_headers = ["Combined", "Optimised"]
-        incr_keys = ["combined", "optimised"]
-        incr_rows = [
-            (f"Incremental {f.metadata.get('label', f.name)}", f.metadata.get("pct", False), f.metadata.get("suffix", ""), [getattr(self.incremental[c], f.name) for c in incr_keys])
-            for f in dataclasses.fields(RelativeMetrics)
-        ]
-        sections.append(render_table(incr_headers, incr_rows, title="--- Incremental (vs Book) ---"))
+        for f in dataclasses.fields(ConnectorExtras):
+            if f.name in ("incremental_sharpe_marginal", "incremental_sharpe_realised"):
+                continue
 
-        extras_lines = ["--- Additional Metrics ---"]
-
-        for f in dataclasses.fields(self.extras):
             value = getattr(self.extras, f.name)
             label = f.metadata.get("label", f.name)
             pct = f.metadata.get("pct", False)
 
-            if isinstance(value, dict):
-                formatted = ", ".join(f"{k}: {format_value(v, pct=pct)}" for k, v in value.items())
-            else:
-                formatted = format_value(value, pct=pct)
+            values = [format_value(value.get(c), pct=pct) for c in col_keys] if isinstance(value, dict) else [format_value(value, pct=pct)] + ["-"] * (len(col_keys) - 1)
+            extras_rows.append((label, values))
 
-            extras_lines.append(f"{label}: {formatted}")
+        extras_table = render_sections(headers, [(None, extras_rows)], show_header=False)
 
-        sections.append("\n".join(extras_lines))
-
-        return "\n\n".join(sections)
+        return (
+            "=== Portfolio Integration & Risk Report ===\n" + main_table
+            + "\n\n--- Incremental (vs Book) ---\n" + incremental_table
+            + "\n\n--- Additional Metrics ---\n" + extras_table
+        )

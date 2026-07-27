@@ -3,7 +3,7 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import pandas as pd
 from .base import AnalysisReport
-from .metrics import compute_series_metrics, compute_trade_metrics, compute_relative_metrics, paired_rows, metric_rows, render_table
+from .metrics import SeriesMetrics, TradeMetrics, RelativeMetrics, compute_series_metrics, compute_trade_metrics, compute_relative_metrics, dataclass_rows, render_sections
 
 class Tearsheet(AnalysisReport):
     def __init__(self, df: pd.DataFrame) -> None:
@@ -78,8 +78,8 @@ class Tearsheet(AnalysisReport):
         Return a formatted text tearsheet summary.
         """
 
-        rows = paired_rows(self.strategy, self.benchmark)
-        rows += metric_rows(self.trades, columns=2, at=0)
-        rows += metric_rows(self.relative, columns=2, at=0)
+        groups = dataclass_rows([self.strategy, self.benchmark], SeriesMetrics)
+        groups += dataclass_rows([self.trades, None], TradeMetrics, default_section="Trades")
+        groups += dataclass_rows([self.relative, None], RelativeMetrics, default_section="Relative (vs Benchmark)")
 
-        return render_table(["Strategy", "Benchmark"], rows)
+        return render_sections(["Strategy", "Benchmark"], groups)

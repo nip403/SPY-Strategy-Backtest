@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import dataclasses
 from scipy.stats import gaussian_kde
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
@@ -9,7 +8,7 @@ import numpy as np
 from datetime import date
 from .base import AnalysisReport
 from .tearsheet import Tearsheet
-from .metrics import SeriesMetrics, TradeMetrics, RelativeMetrics, render_table
+from .metrics import SeriesMetrics, TradeMetrics, RelativeMetrics, dataclass_rows, render_sections
 from ..utils import trade_stats, compute_drawdown
 
 class PortfolioDecomposer(AnalysisReport):
@@ -227,24 +226,9 @@ class PortfolioDecomposer(AnalysisReport):
         short = self.components["short"]
 
         headers = ["Strategy", "Long-Only", "Short-Only", "Benchmark"]
-        rows = []
 
-        for f in dataclasses.fields(SeriesMetrics):
-            label, pct, suffix = f.metadata.get("label", f.name), f.metadata.get("pct", False), f.metadata.get("suffix", "")
-            rows.append((label, pct, suffix, [
-                getattr(strat.strategy, f.name), getattr(long_.strategy, f.name), getattr(short.strategy, f.name), getattr(strat.benchmark, f.name),
-            ]))
+        groups = dataclass_rows([strat.strategy, long_.strategy, short.strategy, strat.benchmark], SeriesMetrics)
+        groups += dataclass_rows([strat.trades, long_.trades, short.trades, None], TradeMetrics, default_section="Trades")
+        groups += dataclass_rows([strat.relative, long_.relative, short.relative, None], RelativeMetrics, default_section="Relative (vs Benchmark)")
 
-        for f in dataclasses.fields(TradeMetrics):
-            label, pct, suffix = f.metadata.get("label", f.name), f.metadata.get("pct", False), f.metadata.get("suffix", "")
-            rows.append((label, pct, suffix, [
-                getattr(strat.trades, f.name), getattr(long_.trades, f.name), getattr(short.trades, f.name), None,
-            ]))
-
-        for f in dataclasses.fields(RelativeMetrics):
-            label, pct, suffix = f.metadata.get("label", f.name), f.metadata.get("pct", False), f.metadata.get("suffix", "")
-            rows.append((label, pct, suffix, [
-                getattr(strat.relative, f.name), getattr(long_.relative, f.name), getattr(short.relative, f.name), None,
-            ]))
-
-        return render_table(headers, rows)
+        return render_sections(headers, groups)

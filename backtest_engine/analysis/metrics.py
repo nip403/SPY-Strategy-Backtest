@@ -25,14 +25,18 @@ class SeriesMetrics:
     max_loss: float = field(metadata={"label": "Max Loss", "pct": True})
     worst_day: Any = field(metadata={"label": "Worst Day"})
     daily_win_rate: float = field(metadata={"label": "Daily Win Rate", "pct": True})
-    ann_vol: float = field(metadata={"label": "Ann. Volatility", "pct": True})
-    max_drawdown: float = field(metadata={"label": "Max Drawdown", "pct": True})
-    max_dd_days: int = field(metadata={"label": "Max DD Days", "suffix": " Days"})
-    var_95pct: float = field(metadata={"label": "95% VaR", "pct": True})
-    cvar: float = field(metadata={"label": "Expected Shortfall"})
-    sharpe_ratio: float = field(metadata={"label": "Sharpe Ratio"})
-    sortino_ratio: float = field(metadata={"label": "Sortino Ratio"})
-    calmar_ratio: float = field(metadata={"label": "Calmar Ratio"})
+
+    max_drawdown: float = field(metadata={"label": "Max Drawdown", "pct": True, "section": "Drawdowns"})
+    max_dd_days: int = field(metadata={"label": "Max DD Days", "suffix": " Days", "section": "Drawdowns"})
+    max_dd_recovery_days: int = field(metadata={"label": "Max DD Recovery Days", "suffix": " Days", "section": "Drawdowns"})
+
+    ann_vol: float = field(metadata={"label": "Ann. Volatility", "pct": True, "section": "Risk"})
+    var_95pct: float = field(metadata={"label": "95% VaR", "pct": True, "section": "Risk"})
+    cvar: float = field(metadata={"label": "Expected Shortfall", "section": "Risk"})
+
+    sharpe_ratio: float = field(metadata={"label": "Sharpe Ratio", "section": "Ratios"})
+    sortino_ratio: float = field(metadata={"label": "Sortino Ratio", "section": "Ratios"})
+    calmar_ratio: float = field(metadata={"label": "Calmar Ratio", "section": "Ratios"})
 
 @dataclass
 class TradeMetrics:
@@ -48,7 +52,7 @@ class TradeMetrics:
 @dataclass
 class RelativeMetrics:
     """
-    Comparison statistics comparing return series against a reference series.
+    Comparison statistics for a return series against a reference series.
     """
 
     alpha: float = field(metadata={"label": "Alpha"})
@@ -56,6 +60,12 @@ class RelativeMetrics:
     r_squared: float = field(metadata={"label": "R-Squared"})
     information_ratio: float = field(metadata={"label": "Information Ratio"})
     idiosyncratic_risk: float = field(metadata={"label": "Idiosyncratic Risk", "pct": True})  # residual vol after removing beta*reference + alpha/252
+
+    correlation: float = field(metadata={"label": "Correlation"})
+    up_market_capture: float = field(metadata={"label": "Up-Market Capture"})
+    down_market_capture: float = field(metadata={"label": "Down-Market Capture"})
+    lower_tail_dependency: float = field(metadata={"label": "Lower Tail Dependency"})
+    upper_tail_dependency: float = field(metadata={"label": "Upper Tail Dependency"})
 
 @dataclass
 class DailySnapshot:
@@ -70,21 +80,15 @@ class DailySnapshot:
 @dataclass
 class ConnectorExtras:
     """
-    StrategyConnector fields not covered by Tearsheet/SeriesMetrics/RelativeMetrics.
+    StrategyConnector fields not covered by SeriesMetrics/RelativeMetrics.
     Fields are keyed by column name.
     """
 
-    max_dd_recovery_days: dict[str, int] = field(metadata={"label": "Max DD Recovery Days"})
-    correlation_to_book: dict[str, float] = field(metadata={"label": "Correlation to Book"})
     crash_correlation_to_book: dict[str, float] = field(metadata={"label": "Crash Correlation to Book"})
     intraday_correlation_to_book: float = field(metadata={"label": "Intraday Correlation to Book"})
     incremental_sharpe_marginal: float = field(metadata={"label": "Incremental Sharpe (Marginal)"})
     incremental_sharpe_realised: dict[str, float] = field(metadata={"label": "Incremental Sharpe (Realised)"})
-    lower_tail_dependency: dict[str, float] = field(metadata={"label": "Lower Tail Dependency"})
-    upper_tail_dependency: dict[str, float] = field(metadata={"label": "Upper Tail Dependency"})
     cvar_monte_carlo: dict[str, float] = field(metadata={"label": "95% cVar (Monte Carlo)", "pct": True})
-    up_market_capture: dict[str, float] = field(metadata={"label": "Up-Market Capture"})
-    down_market_capture: dict[str, float] = field(metadata={"label": "Down-Market Capture"})
     strategy_weight: dict[str, float] = field(metadata={"label": "Strategy Weight", "pct": True})
     total_aum_initial: dict[str, float] = field(metadata={"label": "Total AUM (Initial)"})
     total_aum_final: dict[str, float] = field(metadata={"label": "Total AUM (Final)"})
@@ -115,6 +119,15 @@ def compute_series_metrics(returns: pd.Series, drawdown: pd.Series) -> SeriesMet
     state_changes = (underwater != underwater.shift()).cumsum()
     max_dd_days = int(drawdown.where(underwater).groupby(state_changes).count().max())
 
+    # recovery: bars from the trough until drawdown first returns to ~0 (else: end of series)
+    dd_arr = drawdown.to_numpy()
+    trough_idx = int(np.argmin(dd_arr))
+    rows = np.arange(len(dd_arr))
+    recovered = np.where((rows >= trough_idx) & np.isclose(dd_arr, 0), rows, np.inf)
+    recovery_idx = recovered.min()
+    recovery_idx = len(dd_arr) if np.isinf(recovery_idx) else recovery_idx
+    max_dd_recovery_days = int(recovery_idx - trough_idx)
+
     var_95 = float(np.percentile(returns, 5))
     cvar = float(np.nanmean(np.where(returns <= var_95, returns, np.nan)))
 
@@ -135,6 +148,7 @@ def compute_series_metrics(returns: pd.Series, drawdown: pd.Series) -> SeriesMet
         ann_vol=ann_vol,
         max_drawdown=max_dd,
         max_dd_days=max_dd_days,
+        max_dd_recovery_days=max_dd_recovery_days,
         var_95pct=var_95,
         cvar=cvar,
         sharpe_ratio=_safe_div(avg_daily_return * 252, ann_vol),
@@ -190,14 +204,31 @@ def compute_relative_metrics(returns: pd.Series, reference: pd.Series) -> Relati
     residual = returns - (reference * beta + alpha / 252)
     idiosyncratic_risk = float(residual.std()) * np.sqrt(252)
 
+    up_mask = reference > 0
+    down_mask = reference < 0
+    up_market_capture = _safe_div(returns[up_mask].mean(), reference[up_mask].mean()) if up_mask.any() else float("nan")
+    down_market_capture = _safe_div(returns[down_mask].mean(), reference[down_mask].mean()) if down_mask.any() else float("nan")
+
+    ref_lower_mask = reference <= reference.quantile(0.10)
+    ref_upper_mask = reference >= reference.quantile(0.90)
+    ret_lower_q = returns.quantile(0.10)
+    ret_upper_q = returns.quantile(0.90)
+    lower_tail_dependency = _safe_div(float(((returns <= ret_lower_q) & ref_lower_mask).sum()), float(ref_lower_mask.sum()))
+    upper_tail_dependency = _safe_div(float(((returns >= ret_upper_q) & ref_upper_mask).sum()), float(ref_upper_mask.sum()))
+
     return RelativeMetrics(
         alpha=alpha,
         beta=float(beta),
         r_squared=r_squared,
         information_ratio=information_ratio,
         idiosyncratic_risk=idiosyncratic_risk,
+        correlation=float(correlation),
+        up_market_capture=up_market_capture,
+        down_market_capture=down_market_capture,
+        lower_tail_dependency=lower_tail_dependency,
+        upper_tail_dependency=upper_tail_dependency,
     )
-    
+
 ##### Print/Output Pipeline #####
 
 def format_value(value: Any, *, pct: bool = False, suffix: str = "") -> str:
@@ -229,80 +260,75 @@ def format_value(value: Any, *, pct: bool = False, suffix: str = "") -> str:
 
     return f"{value}{suffix}"
 
-def metric_rows(instance: Any, *, columns: int, at: int) -> list[tuple[str, bool, str, list[Any]]]:
+def dataclass_rows(instances: list[Optional[Any]], reference_cls: type, *, default_section: Optional[str] = None) -> list[tuple[Optional[str], list[tuple[str, list[str]]]]]:
     """
-    Turn one dataclass instance's fields into row tuples for render_table.
-    Values are placed at position "at" across "columns" total columns (other positions left as None).
+    Turn dataclass fields into (section_title, rows) groups for render_sections.
 
-    instance : Any
-        A dataclass instance (SeriesMetrics, TradeMetrics, or RelativeMetrics).
-    columns : int
-        Total number of columns in the target table.
-    at : int
-        Column index this instance's values should populate.
+    Fields carrying "section" metadata are grouped by declaration order.
+    Fields without one fall back to default_section.
 
-    Returns list[tuple[str, bool, str, list[Any]]]
-        (label, pct, suffix, values) rows for render_table.
-    """
+    instances : list[Optional[Any]]
+        Dataclass instances aligned 1:1 to the target table's columns (None = "-" for that column).
+    reference_cls : type
+        The dataclass type instances share (drives field order/labels/formatting).
+    default_section : Optional[str] = None
+        Section title used for fields with no "section" metadata of their own.
 
-    rows = []
-
-    for f in dataclasses.fields(instance):
-        values = [None] * columns
-        values[at] = getattr(instance, f.name)
-        rows.append((f.metadata.get("label", f.name), f.metadata.get("pct", False), f.metadata.get("suffix", ""), values))
-
-    return rows
-
-def paired_rows(strategy: Any, benchmark: Optional[Any]) -> list[tuple[str, bool, str, list[Any]]]:
-    """
-    Turn a strategy/benchmark pair of the *same* dataclass type into 2-column row tuples.
-    Used for SeriesMetrics.
-
-    strategy : Any
-        Strategy-side dataclass instance.
-    benchmark : Optional[Any]
-        Benchmark-side dataclass instance (or None to show "-").
-
-    Returns list[tuple[str, bool, str, list[Any]]]
-        (label, pct, suffix, [strategy_value, benchmark_value]) rows.
+    Returns list[tuple[Optional[str], list[tuple[str, list[str]]]]]
+        (section_title, [(label, formatted_values), ...]) groups.
     """
 
-    rows = []
+    groups: list[tuple[Optional[str], list]] = []
+    current: Any = object()  # sentinel, guaranteed to differ from any real section value
 
-    for f in dataclasses.fields(strategy):
-        s_val = getattr(strategy, f.name)
-        b_val = getattr(benchmark, f.name) if benchmark is not None else None
-        rows.append((f.metadata.get("label", f.name), f.metadata.get("pct", False), f.metadata.get("suffix", ""), [s_val, b_val]))
+    for f in dataclasses.fields(reference_cls):
+        section = f.metadata.get("section", default_section)
 
-    return rows
+        if section != current:
+            groups.append((section, []))
+            current = section
 
-def render_table(headers: list[str], rows: list[tuple[str, bool, str, list[Any]]], *, title: Optional[str] = None) -> str:
+        label = f.metadata.get("label", f.name)
+        pct = f.metadata.get("pct", False)
+        suffix = f.metadata.get("suffix", "")
+        values = [format_value(getattr(inst, f.name), pct=pct, suffix=suffix) if inst is not None else "-" for inst in instances]
+
+        groups[-1][1].append((label, values))
+
+    return groups
+
+def render_sections(headers: list[str], groups: list[tuple[Optional[str], list[tuple[str, list[str]]]]], *, show_header: bool = True) -> str:
     """
-    Render a fixed-width text table shared by every AnalysisReport subclass.
+    Render metric groups as a single pandas-styled table with section titles inserted as divider rows.
 
     headers : list[str]
         Column header labels.
-    rows : list[tuple[str, bool, str, list[Any]]]
-        (label, pct, suffix, values) rows, values has len(headers) entries (None for N/A cells).
-    title : Optional[str] = None
-        Optional title line prepended above the header row.
+    groups : list[tuple[Optional[str], list[tuple[str, list[str]]]]]
+        (section_title, rows) groups, as produced by dataclass_rows.
+    show_header : bool = True
+        Whether to print the column header row.
 
     Returns str
-        Formatted table.
+        Formatted table, in the style of pd.DataFrame.to_string().
     """
 
-    w_metric, w_col = 25, 15
+    index = []
+    data = {h: [] for h in headers}
 
-    lines = [title] if title else []
-    lines.append(f"{'':<{w_metric}}" + "".join(f"{h:>{w_col}}" for h in headers))
+    for i, (title, rows) in enumerate(groups):
+        if i > 0:
+            index.append("")
+            for h in headers:
+                data[h].append("")
 
-    for label, pct, suffix, values in rows:
-        line = f"{label:<{w_metric}}"
+        if title:
+            index.append("> " + title)
+            for h in headers:
+                data[h].append("")
 
-        for value in values:
-            line += f"{format_value(value, pct=pct, suffix=suffix):>{w_col}}"
+        for label, values in rows:
+            index.append(label)
+            for h, v in zip(headers, values):
+                data[h].append(v)
 
-        lines.append(line)
-
-    return "\n".join(lines)
+    return pd.DataFrame(data, index=index).to_string(header=show_header)
