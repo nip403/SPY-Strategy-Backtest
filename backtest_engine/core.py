@@ -170,7 +170,7 @@ class Portfolio:
         return self.cost_model.returns_matrix(aum, position_matrix, gross_matrix, self.cache)
 
     @classmethod
-    def sharpe_curve(cls, df: pd.DataFrame, min_aum: int = 1e4, max_aum: int = 1e12 , base_aum: int = None, **kwargs: Any) -> None:
+    def sharpe_curve(cls, df: pd.DataFrame, min_aum: int = 1e4, max_aum: int = 1e12 , base_aum: int = None, resolution: int = 9, **kwargs: Any) -> None:
         """
         Plot strategy Sharpe ratio across different portfolio capacities.
 
@@ -182,13 +182,16 @@ class Portfolio:
             Maximum portfolio size evaluated.
         base_aum : int = None
             Reference portfolio size used for comparison.
+        resolution : int = 9
+            Number of candidate portfolios generated per power-of-10-AUM (not inclusive). 
+            Higher values increase plot smoothness at the severe cost of memory (up to GBs of RAM).
         **kwargs : Any
             Additional parameters passed to instantiate the class during construction.
             Can include strategy=/execution=/cost_model= to evaluate a specific composition.
         """
 
         base_aum = min_aum if base_aum is None else np.clip(base_aum, min_aum, max_aum)
-        aum = np.logspace(np.log10(min_aum), np.log10(max_aum), num=int(np.log10(max_aum) - np.log10(min_aum)) * 9 + 1) # assumes 9 points per power of 10, even AUMs only when bounded by 1eX
+        aum = np.append((10 ** np.arange(int(np.log10(min_aum)), int(np.log10(max_aum)))[:, None] * np.linspace(1, 10, resolution, endpoint=False)).flatten(), max_aum)
 
         if not np.any(np.isclose(aum, base_aum, rtol=1e-9)):
             aum = np.sort(np.append(aum, base_aum))
@@ -203,23 +206,26 @@ class Portfolio:
         fmt_aum = lambda x: f"{x:.1e}".replace("e+", "e") if np.isfinite(x) else "N/A"
 
         # calculate crossing AUM for Sharpe = 1
-        roots = InterpolatedUnivariateSpline(np.log10(aum), sharpes - 1, k=1).roots()
+        roots = InterpolatedUnivariateSpline(np.log10(aum), sharpes - 1, k=3).roots()
         cross = 10 ** roots[0] if len(roots) > 0 else float("nan")
 
         fig, ax = plt.subplots(figsize=(12, 8))
 
-        ax.plot(aum, sharpes, color="blue", label="Sharpe")
-        ax.axhline(1, color="gray", linestyle="--", linewidth=1, label=f"Base (SR: 1.00, AUM: {fmt_aum(cross)})")
+        x_idx = np.arange(len(aum))
+        ax.plot(x_idx, sharpes, color="blue", label="Sharpe")
+        ax.axhline(1, color="gray", linestyle="--", linewidth=1, label=f"Base (AUM={fmt_aum(cross)})")
         ax.axhline(0, color="black", linestyle="-", linewidth=1, label="Risk Free")
 
-        ax.set_xscale("log")
-        ax.set_xlim(min(aum), max(aum))
-        ax.set_xlabel("AUM ($)")
+        ax.set_xlim(0, len(aum) - 1)
+        ax.set_xlabel("AUM ($, Piecewise-Linear-Scaled)")
         ax.set_ylabel("Sharpe Ratio")
         ax.set_title(f"{cls.__name__} Capacity: Sharpe vs AUM", fontweight="bold")
 
-        ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"${x:,.0f}"))
-        ax.xaxis.set_minor_locator(ticker.NullLocator())  # only labelled powers-of-10 ticks (10k, 100k, ...) shown
+        # map artificial index back to the real AUM values for labels
+        ax.xaxis.set_major_locator(ticker.FixedLocator(np.arange(0, len(aum), resolution)))
+        ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"${aum[int(round(x))]:,.0f}" if 0 <= int(round(x)) < len(aum) else ""))
+        ax.xaxis.set_minor_locator(ticker.NullLocator())
+        
         ax.legend(loc="upper right")
 
         plt.tight_layout()
