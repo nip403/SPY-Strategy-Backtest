@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from scipy.interpolate import InterpolatedUnivariateSpline
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 from matplotlib import dates as mdates
@@ -199,30 +200,16 @@ class Portfolio:
         stds = np.nanstd(matrix, axis=0)
         sharpes = np.where(stds != 0, (means / stds) * np.sqrt(252 * 390), 0) # annualise from minutes
 
-        base_sharpe = sharpes[np.argmin(np.abs(aum - base_aum))]
-        target_sharpe = base_sharpe * 0.5
+        fmt_aum = lambda x: f"{x:.1e}".replace("e+", "e") if np.isfinite(x) else "N/A"
 
-        # AUM at which the curve crosses target_sharpe, via log-aum interpolation (nan if it never does)
-        below = sharpes <= target_sharpe
-        if below.any() and not below.all():
-            idx = np.argmax(below)
-            if idx > 0:
-                x0, x1 = np.log10(aum[idx - 1]), np.log10(aum[idx])
-                y0, y1 = sharpes[idx - 1], sharpes[idx]
-                frac = (target_sharpe - y0) / (y1 - y0) if y1 != y0 else 0.0
-                crossing_aum = 10 ** (x0 + frac * (x1 - x0))
-            else:
-                crossing_aum = aum[idx]
-        else:
-            crossing_aum = float("nan")
-
-        fmt_aum = lambda x: f"{x:.0e}" if np.isfinite(x) else "N/A"
+        # calculate crossing AUM for Sharpe = 1
+        roots = InterpolatedUnivariateSpline(np.log10(aum), sharpes - 1, k=1).roots()
+        cross = 10 ** roots[0] if len(roots) > 0 else float("nan")
 
         fig, ax = plt.subplots(figsize=(12, 8))
 
         ax.plot(aum, sharpes, color="blue", label="Sharpe")
-        ax.axhline(base_sharpe, color="gray", linestyle="--", linewidth=1, label=f"Base Sharpe (SR: {base_sharpe:.2f}, AUM: {fmt_aum(base_aum)})")
-        ax.axhline(target_sharpe, color="red", linestyle="--", linewidth=1, label=f"50% Base (SR: {target_sharpe:.2f}, AUM: {fmt_aum(crossing_aum)})")
+        ax.axhline(1, color="gray", linestyle="--", linewidth=1, label=f"Base (SR: 1.00, AUM: {fmt_aum(cross)})")
         ax.axhline(0, color="black", linestyle="-", linewidth=1, label="Risk Free")
 
         ax.set_xscale("log")
