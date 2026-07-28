@@ -20,7 +20,7 @@ from .components.execution import NaiveExecution
 from .components.cost_model import FlatCostModel
 
 class Portfolio:
-    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, long_permissions: bool = True, short_permissions: bool = True, *, strategy_model: Optional[StrategyComponent] = None, execution_model: Optional[ExecutionComponent] = None, cost_model: Optional[CostComponent] = None) -> None:
+    def __init__(self, df: pd.DataFrame, aum: float = 100_000, target_vol: float = 0.02, max_leverage: float = 4, long_permissions: bool = True, short_permissions: bool = True, *, strategy_model: Optional[StrategyComponent] = None, execution_model: Optional[ExecutionComponent] = None, cost_model: Optional[CostComponent] = None) -> None:
         """
         Initialise and run a complete portfolio backtest.
         Strategy is modelled from "Beat the Market" paper, attached in repo.
@@ -36,6 +36,8 @@ class Portfolio:
             Initial portfolio value.
         target_vol : float = 0.02
             Target volatility used for position sizing, specified in the attached paper.
+        max_leverage : float = 4
+            Maximum leverage backtest can employ.
         long_permissions : bool = True
             Whether long trades are allowed.
         short_permissions : bool = True
@@ -66,6 +68,7 @@ class Portfolio:
             target_vol=target_vol,
             long_perm=long_permissions,
             short_perm=short_permissions,
+            max_leverage=max_leverage,
         )
 
         self.cache = {}
@@ -147,13 +150,30 @@ class Portfolio:
 
         return df
 
+    def returns_matrix_components(self, aum: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Generate positions, gross returns, and net returns across multiple portfolio sizes.
+        Capacity-constrained execution makes positions AUM-dependent, so fills are recomputed per AUM.
+
+        aum : np.ndarray
+            Portfolio capital values to evaluate.
+
+        Returns tuple[np.ndarray, np.ndarray, np.ndarray]
+            (position_matrix, gross_matrix, net_matrix), each with one column per AUM value.
+        """
+
+        aum = np.asarray(aum, dtype=float)
+        ret = self.df["ret"].to_numpy()[:, None]
+
+        position_matrix = self.execution.fill_matrix(aum, self.cache)
+        gross_matrix = np.vstack([np.zeros((1, len(aum))), position_matrix[:-1]]) * ret
+        net_matrix = self.cost_model.returns_matrix(aum, position_matrix, gross_matrix, self.cache)
+
+        return position_matrix, gross_matrix, net_matrix
+
     def returns_matrix(self, aum: np.ndarray) -> np.ndarray:
         """
-        Generate returns across multiple portfolio sizes.
-
-        Capacity-constrained execution makes positions AUM-dependent, so fills are recomputed per
-        AUM (vectorised, via execution.fill_matrix) rather than reusing the single fill this
-        instance was constructed with.
+        Generate net returns across multiple portfolio sizes. Wraps returns_matrix_components for internal back-compatibility.
 
         aum : np.ndarray
             Portfolio capital values to evaluate.
@@ -162,13 +182,7 @@ class Portfolio:
             Matrix of returns with one column per AUM value.
         """
 
-        aum = np.asarray(aum, dtype=float)
-        ret = self.df["ret"].to_numpy()[:, None]
-
-        position_matrix = self.execution.fill_matrix(aum, self.cache)
-        gross_matrix = np.vstack([np.zeros((1, len(aum))), position_matrix[:-1]]) * ret
-
-        return self.cost_model.returns_matrix(aum, position_matrix, gross_matrix, self.cache)
+        return self.returns_matrix_components(aum)[2]
 
     @classmethod
     def sharpe_curve(cls, df: pd.DataFrame, min_aum: int = 1e4, max_aum: int = 1e12 , base_aum: int = None, resolution: int = 9, *, savepath: Optional[str | Path] = None, **kwargs: Any) -> None:

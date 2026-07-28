@@ -18,12 +18,15 @@ class BacktestContext:
         Whether long positions are permitted.
     short_perm : bool
         Whether short positions are permitted.
+    max_leverage : float
+        Maximum leverage backtest can deploy.
     """
 
     aum: float
     target_vol: float
     long_perm: bool
     short_perm: bool
+    max_leverage: float
 
 class StrategyComponent(ABC):
     @abstractmethod

@@ -33,24 +33,10 @@ class PortfolioDecomposer(AnalysisReport):
         df = self.portfolio.df.loc[str(start_date): str(end_date)]
 
         # long/short split
-        positions = pd.concat(
-            [df["position"].clip(lower=0), df["position"].clip(upper=0)],
-            axis=1,
-            keys=["long", "short"]
-        )
+        legs = self.split_long_short(*(col[:, None] for col in df[["position", "ret", "gross_ret", "net_ret"]].to_numpy().T))
 
-        gross_ret = positions.shift(1).fillna(0).mul(df["ret"], axis=0)
-
-        # cost split - distributed proportionally when trade flips
-        delta = positions.diff().abs().fillna(0)
-
-        costs = (
-            delta
-            .div(delta.sum(axis=1), axis=0).fillna(0) # proportion l/s of total flip/position change
-            .mul(df["gross_ret"] - df["net_ret"], axis=0) # multiply by modelled cost
-        )
-
-        net_ret = gross_ret - costs
+        positions = {leg: pd.Series(legs[leg]["position"][:, 0], index=df.index) for leg in ["long", "short"]}
+        net_ret = {leg: pd.Series(legs[leg]["net_ret"][:, 0], index=df.index) for leg in ["long", "short"]}
 
         # prepare tearsheets for each component
         def build(ret: pd.Series, pos: pd.Series) -> pd.DataFrame:
@@ -86,7 +72,7 @@ class PortfolioDecomposer(AnalysisReport):
                 self.portfolio.stats.loc[start_date: end_date, ["strat_ret", "bench_ret"]],
                 long_df["strat_ret"].rename("long"),
                 short_df["strat_ret"].rename("short"),
-            ],
+                ],
             axis=1,
         ).fillna(0).rename(
             columns={
@@ -96,6 +82,40 @@ class PortfolioDecomposer(AnalysisReport):
                 "short": "Short-Only",
             }
         )
+    
+    @classmethod
+    def split_long_short(cls, position: np.ndarray, ret: np.ndarray, gross: np.ndarray, net: np.ndarray) -> dict[str, dict[str, np.ndarray]]:
+        """
+        Decompose position/gross/net return matrices into independent long and short legs.
+
+        Costs are attributed proportionally to each leg's share of that bar's position change
+            
+        position, ret, gross, net : np.ndarray
+            (n_bars, n_scenarios) arrays sharing Portfolio.df's "position"/"ret"/"gross_ret"/"net_ret" series (or their matrix equivalents from Portfolio.returns_matrix_components). 
+            Ret may be (n_bars, 1) to broadcast across scenarios.
+
+        Returns dict[str, dict[str, np.ndarray]]
+            {"long": {"position": ..., "net_ret": ...}, "short": {...}}, each (n_bars, n_scenarios).
+        """
+
+        pos_long, pos_short = np.clip(position, 0, None), np.clip(position, None, 0)
+
+        gross_long = np.vstack([np.zeros((1, pos_long.shape[1])), pos_long[:-1]]) * ret
+        gross_short = np.vstack([np.zeros((1, pos_short.shape[1])), pos_short[:-1]]) * ret
+
+        delta_long = np.abs(np.diff(pos_long, axis=0, prepend=pos_long[:1]))
+        delta_short = np.abs(np.diff(pos_short, axis=0, prepend=pos_short[:1]))
+        
+        total_delta = delta_long + delta_short
+        cost = gross - net
+        
+        cost_long = np.divide(delta_long, total_delta, out=np.zeros_like(cost), where=(total_delta != 0)) * cost
+        cost_short = np.divide(delta_short, total_delta, out=np.zeros_like(cost), where=(total_delta != 0)) * cost
+
+        return {
+            "long": {"position": pos_long, "net_ret": gross_long - cost_long},
+            "short": {"position": pos_short, "net_ret": gross_short - cost_short},
+        }
 
     def plot(self, *, savepath: Optional[str | Path] = None) -> None:
         """

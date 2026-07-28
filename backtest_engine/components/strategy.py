@@ -79,7 +79,7 @@ class BaseStrategy(StrategyComponent):
 
         end_of_day = df.index.time == pd.Timestamp("15:59").time()
 
-        df["position"] = resolve_positions(np.asarray([long_entry, short_entry, long_exit, short_exit, end_of_day]).T) * (ctx.target_vol / df["std"]).clip(lower=-4, upper=4)
+        df["position"] = resolve_positions(np.asarray([long_entry, short_entry, long_exit, short_exit, end_of_day]).T) * (ctx.target_vol / df["std"]).clip(lower=-ctx.max_leverage, upper=ctx.max_leverage)
 
         return df
 
@@ -121,7 +121,7 @@ class RollingImmediateStopStrategy(StrategyComponent):
         short_exit = df["close"] > df["short_stop"]
         end_of_day = df.index.time == pd.Timestamp("15:59").time()
 
-        df["position"] = resolve_positions(np.asarray([long_entry, short_entry, long_exit, short_exit, end_of_day]).T) * (ctx.target_vol / df["std"]).clip(lower=-4, upper=4)
+        df["position"] = resolve_positions(np.asarray([long_entry, short_entry, long_exit, short_exit, end_of_day]).T) * (ctx.target_vol / df["std"]).clip(lower=-ctx.max_leverage, upper=ctx.max_leverage)
 
         return df
 
@@ -166,7 +166,7 @@ class RollingIntervalStopStrategy(StrategyComponent):
         short_exit = (df["close"] > df["short_stop"]) & intervals
         end_of_day = df.index.time == pd.Timestamp("15:59").time()
 
-        df["position"] = resolve_positions(np.asarray([long_entry, short_entry, long_exit, short_exit, end_of_day]).T) * (ctx.target_vol / df["std"]).clip(lower=-4, upper=4)
+        df["position"] = resolve_positions(np.asarray([long_entry, short_entry, long_exit, short_exit, end_of_day]).T) * (ctx.target_vol / df["std"]).clip(lower=-ctx.max_leverage, upper=ctx.max_leverage)
 
         return df
 
@@ -195,6 +195,6 @@ class QuarterHourSampleStrategy(StrategyComponent):
 
         end_of_day = df.index.time == pd.Timestamp("15:59").time()
 
-        df["position"] = resolve_positions(np.asarray([long_entry, short_entry, long_exit, short_exit, end_of_day]).T) * (ctx.target_vol / df["std"]).clip(lower=-4, upper=4)
+        df["position"] = resolve_positions(np.asarray([long_entry, short_entry, long_exit, short_exit, end_of_day]).T) * (ctx.target_vol / df["std"]).clip(lower=-ctx.max_leverage, upper=ctx.max_leverage)
 
         return df

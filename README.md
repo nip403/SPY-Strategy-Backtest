@@ -24,7 +24,8 @@ backtest_engine/
     ├── metrics.py                   Shared metric dataclasses + computation
     ├── tearsheet.py                 Tearsheet
     ├── decomposition.py             Long/short strategy decomposer
-    └── connector.py                 Book integration analysis
+    ├── connector.py                 Book integration analysis
+    └── capacity.py                  Capacity & alpha decay estimator
 ```
 
 ## Dependencies
@@ -35,7 +36,6 @@ Alpaca API credentials are required for live data pulls (`data.request`); cached
 
 ### Todo
 
-- test suite
 - fix optimiser from MVO
 - optimise pd -> np/numba
 - out of sample testing

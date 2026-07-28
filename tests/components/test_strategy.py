@@ -46,8 +46,8 @@ def _make_signal_df(times: list[str], *, close, upper_bound, lower_bound, long_s
         "std": std or [0.01] * len(times),
     }, index=idx)
 
-def _ctx(*, long_perm=True, short_perm=True) -> BacktestContext:
-    return BacktestContext(aum=100_000, target_vol=0.02, long_perm=long_perm, short_perm=short_perm)
+def _ctx(*, long_perm=True, short_perm=True, max_leverage=4.0) -> BacktestContext:
+    return BacktestContext(aum=100_000, target_vol=0.02, long_perm=long_perm, short_perm=short_perm, max_leverage=max_leverage)
 
 def test_base_strategy_only_fires_on_half_hour_intervals():
     df = _make_signal_df(

@@ -10,6 +10,7 @@ from .analysis.metrics import SeriesMetrics, TradeMetrics, RelativeMetrics, Conn
 from .analysis.tearsheet import Tearsheet
 from .analysis.decomposition import PortfolioDecomposer
 from .analysis.connector import StrategyConnector
+from .analysis.capacity import CapacityEstimator
 
 from .utils import generate_toy_returns, generate_toy_equity
 
@@ -31,6 +32,7 @@ __all__ = [
     "Tearsheet",
     "PortfolioDecomposer",
     "StrategyConnector",
+    "CapacityEstimator",
 
     "Portfolio",
 
