@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 import warnings
 from .base import AnalysisReport
+from .decomposition import PortfolioDecomposer
 from .metrics import SeriesMetrics, RelativeMetrics, ConnectorExtras, compute_series_metrics, compute_relative_metrics, format_value, dataclass_rows, merge_groups, render_sections
 from ..utils import compute_drawdown, save_figures
 
@@ -18,6 +19,11 @@ class StrategyConnector(AnalysisReport):
         """
         Initialise portfolio integration analysis between an existing strategy and a master trading book.
         Combines strategy returns with an existing portfolio, evaluates naive and optimised allocations, and generates key metrics.
+
+        The strategy is split into long and short legs:
+            Long exposure is funded by withdrawing "weight" fraction of book capital and deploying it (i.e. reallocation).
+            Short exposure is margin-funded: its notional is sized identically (the same weight). No margin limit or financing/borrow cost is modelled.
+            If the provided strategy is short-only, optimal weight is determined by varying short-leg notional from 0-100% of book value.
 
         Only evaluates the period intersected by strategy-book-benchmark indices.
 
@@ -38,7 +44,7 @@ class StrategyConnector(AnalysisReport):
         self.bench = benchmark_equity
         self.rebalance_period = rebalance_period
 
-        # returns comparison df
+        # returns comparison df - long/short legs are internal only
         self.df = (
             pd.concat([
                 self.portfolio.df["net_ret"],
@@ -53,10 +59,18 @@ class StrategyConnector(AnalysisReport):
         self.df.columns = ["strat", "book", "bench"]
         self.daily = (1 + self.df).groupby(self.df.index.date).prod() - 1
 
+        # internal-only long/short daily legs at the portfolio's own construction AUM, used to
+        # bootstrap the mixing/optimiser search - not exposed as public df/daily columns
+        daily_long, daily_short = self._exact_leg_returns(np.array([self.portfolio.aum]))
+        self._daily_long = pd.Series(daily_long[:, 0], index=self.daily.index)
+        self._daily_short = pd.Series(daily_short[:, 0], index=self.daily.index)
+        self._has_long_leg = bool((self._daily_long != 0).any())
+
         # create bundled portfolios - assumes regular rebalancing to given weight every self.rebalance_period days
         # NOTE: weights are BACKWARDS looking, set to base off book/strategy starting equity
         self._naive_w = 0.5
-        self.daily["combined"] = self._mix_returns(np.array([self._naive_w]), self._get_exact_returns(self._naive_w))[:, 0] # naive mix: target weight = initial starting capital proportions
+        naive_long, naive_short = self._exact_block_leg_returns(self._naive_w)
+        self.daily["combined"] = self._mix_returns(np.array([self._naive_w]), naive_long, naive_short)[:, 0] # naive mix: target weight = initial starting capital proportions
 
         self._opt_w, self.daily["optimised"] = self._optimise_weight()
 
@@ -70,11 +84,9 @@ class StrategyConnector(AnalysisReport):
     def _optimise_weight(self, depth: int = 3, points: int = 11) -> tuple[float, pd.Series]:
         """
         Optimise strategy allocation weight by Sharpe ratio using an iterative 1D grid search.
-        Searches over strategy weights and selects the allocation producing the highest annualised Sharpe ratio.
+        Searches over the weight used to size both legs, and selects the allocation maximising sharpe.
 
-        Uses an AUM mean scaling approximation to project cost changes as strategy is rebalanced to avoid ridiculously high memory needs.
-
-        Assumes trading book capital remains constant while adjusting weights for the strategy.
+        Uses an AUM mean scaling approximation to project cost changes as strategy is rebalanced to avoid ridiculously high memory needs..
 
         depth : int = 3
             Number of refinement rounds performed around the best weight.
@@ -92,7 +104,11 @@ class StrategyConnector(AnalysisReport):
         for _ in range(depth):
             weights = np.linspace(lo, hi, points)
 
-            approx_mixed = self._mix_returns(weights, np.tile(self.daily["strat"].values[:, None], (1, points)))
+            approx_mixed = self._mix_returns(
+                weights,
+                np.tile(self._daily_long.values[:, None], (1, points)),
+                np.tile(self._daily_short.values[:, None], (1, points)),
+            )
 
             # average portfolio growth factor
             port_growth = np.cumprod(1 + approx_mixed, axis=0)
@@ -104,12 +120,8 @@ class StrategyConnector(AnalysisReport):
             # scale by mean mixed growth per weight
             aums = weights * self.initial_book_cap * mean_growth
 
-            daily = (pd.DataFrame(
-                1 + self.portfolio.returns_matrix(aums),
-                index=self.portfolio.df.index,
-            ).groupby(self.portfolio.df.index.date).prod() - 1).loc[self.daily.index].values
-
-            mixed = self._mix_returns(weights, daily)
+            long_daily, short_daily = self._exact_leg_returns(aums)
+            mixed = self._mix_returns(weights, long_daily, short_daily)
 
             std = np.nanstd(mixed, axis=0)
             sharpes = np.where(std != 0, (np.nanmean(mixed, axis=0) / std) * np.sqrt(252), 0)
@@ -121,26 +133,30 @@ class StrategyConnector(AnalysisReport):
             lo = max(0, best_weight - span)
             hi = min(1, best_weight + span)
 
-        final_mixed = self._mix_returns(np.array([best_weight]), self._get_exact_returns(best_weight))[:, 0]
+        final_long, final_short = self._exact_block_leg_returns(best_weight)
+        final_mixed = self._mix_returns(np.array([best_weight]), final_long, final_short)[:, 0]
 
         return best_weight, pd.Series(final_mixed, index=self.daily.index)
 
-    def _mix_returns(self, weights: np.ndarray, strat_daily_matrix: np.ndarray) -> np.ndarray:
+    def _mix_returns(self, weights: np.ndarray, long_daily_matrix: np.ndarray, short_daily_matrix: np.ndarray) -> np.ndarray:
         """
-        Combine strategy and book returns according to provided weights, accounting for periodic rebalancing.
-
-        Calculates portfolio returns from changing strategy allocations between rebalance points.
+        Combine long-leg, short-leg, and book returns according to specifed weights, accounting for periodic rebalancing.
+        Long legs withdraw capital from the book, while short legs are margin-funded. 
+        
+        NOTE: No margin limit is assumed - short notional is sized at the same weight.
 
         weights : np.ndarray
             Strategy allocation weights for each return scenario.
-        strat_daily_matrix : np.ndarray
-            Matrix of strategy daily returns across allocation scenarios.
+        long_daily_matrix : np.ndarray
+            Matrix of long-leg daily returns across allocation scenarios. Ignored when self._has_long_leg is False.
+        short_daily_matrix : np.ndarray
+            Matrix of short-leg daily returns across allocation scenarios.
 
         Returns np.ndarray
             Matrix of mixed portfolio daily returns.
         """
 
-        n, k = strat_daily_matrix.shape
+        n, k = short_daily_matrix.shape
         book_daily = self.daily["book"].values[:, None] # reshape to broadcast
 
         # component cumprods
@@ -149,13 +165,28 @@ class StrategyConnector(AnalysisReport):
 
         cum_s[0, :] = cum_b[0, 0] = 1
 
-        np.cumprod(1 + strat_daily_matrix, axis=0, out=cum_s[1:, :])
+        np.cumprod(1 + short_daily_matrix, axis=0, out=cum_s[1:, :])
         np.cumprod(1 + book_daily, axis=0, out=cum_b[1:, :])
 
         rebals = (np.arange(n) // self.rebalance_period) * self.rebalance_period # rebalance windows, element = start index of block
 
-        # broadcast weights
-        p = weights * cum_s[1:, :] / cum_s[rebals, :] + (1 - weights) * cum_b[1:, :] / cum_b[rebals, :]
+        # short leg's dollar P&L, layered on top (margin-funded, additive) regardless of the long leg
+        short_term = weights * (cum_s[1:, :] / cum_s[rebals, :] - 1)
+
+        if self._has_long_leg:
+            cum_l = np.empty((n + 1, k))
+            cum_l[0, :] = 1
+            np.cumprod(1 + long_daily_matrix, axis=0, out=cum_l[1:, :])
+
+            # book + long reallocation + short 
+            p = (
+                weights * cum_l[1:, :] / cum_l[rebals, :]
+                + (1 - weights) * cum_b[1:, :] / cum_b[rebals, :]
+                + short_term
+            )
+        else:
+            # no long leg = book keeps its full growth
+            p = cum_b[1:, :] / cum_b[rebals, :] + short_term
 
         # calc daily mixed returns
         r = p / np.vstack([np.ones((1, k)), p[:-1, :]]) - 1
@@ -163,19 +194,44 @@ class StrategyConnector(AnalysisReport):
 
         return r
 
-    def _get_exact_returns(self, weight: float) -> np.ndarray:
+    def _exact_leg_returns(self, aums: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """
-        Calculates the exact cost-adjusted daily returns for a rebalanced strategy integration.
-        Recomputes strategy returns using exact AUM at each rebalance, scaling strategy capital with true mixed portfolio growth to maintain the target weight.
+        Calculates capacity-aware daily long/short leg returns at each AUM.
+
+        aums : np.ndarray
+            Portfolio capital values to evaluate, one per scenario.
+
+        Returns tuple[np.ndarray, np.ndarray]
+            (long_daily, short_daily), shape (n_days, len(aums)).
+        """
+
+        position_matrix, gross_matrix, net_matrix = self.portfolio.returns_matrix_components(aums)
+        ret = self.portfolio.df["ret"].to_numpy()[:, None]
+
+        legs = PortfolioDecomposer.split_long_short(position_matrix, ret, gross_matrix, net_matrix)
+
+        def to_daily(net_ret_matrix: np.ndarray) -> np.ndarray:
+            return (pd.DataFrame(
+                1 + net_ret_matrix,
+                index=self.portfolio.df.index,
+            ).groupby(self.portfolio.df.index.date).prod() - 1).loc[self.daily.index].values
+
+        return to_daily(legs["long"]["net_ret"]), to_daily(legs["short"]["net_ret"])
+
+    def _exact_block_leg_returns(self, weight: float) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Calculates the exact cost-adjusted daily long/short leg returns for a rebalanced
+        strategy integration. Recomputes leg returns using exact AUM at each rebalance, scaling
+        strategy capital with true mixed portfolio growth to maintain the target weight.
 
         weight : float
             Target strategy allocation.
 
-        Returns np.ndarray
-            Daily strategy return matrix of shape (n_days, 1).
+        Returns tuple[np.ndarray, np.ndarray]
+            (long_daily, short_daily), each of shape (n_days, 1).
         """
 
-        approx_mixed = self._mix_returns(np.array([weight]), self.daily["strat"].values[:, None])[:, 0]
+        approx_mixed = self._mix_returns(np.array([weight]), self._daily_long.values[:, None], self._daily_short.values[:, None])[:, 0]
 
         # portfolio & book growth at the start of each rebalance period
         port_growth = pd.Series(approx_mixed).add(1).cumprod().shift(1).fillna(1).values
@@ -184,12 +240,11 @@ class StrategyConnector(AnalysisReport):
 
         exact_aums = weight * self.initial_book_cap * block_growth
 
-        daily_mixed = (pd.DataFrame(
-            1 + self.portfolio.returns_matrix(exact_aums),
-            index=self.portfolio.df.index,
-        ).groupby(self.portfolio.df.index.date).prod() - 1).loc[self.daily.index].values
+        long_daily, short_daily = self._exact_leg_returns(exact_aums)
 
-        return daily_mixed.reshape(len(self.daily), len(block_growth), 1)[np.arange(len(self.daily)), block_idx]
+        pick = lambda m: m.reshape(len(self.daily), len(block_growth), 1)[np.arange(len(self.daily)), block_idx]
+
+        return pick(long_daily), pick(short_daily)
 
     def _generate_report(self) -> None:
         """
@@ -224,12 +279,10 @@ class StrategyConnector(AnalysisReport):
         book_growth_initial = {col: (self.portfolio.aum if col == "strat" else self.initial_book_cap) for col in non_bench}
         total_aum_final = {col: book_growth_initial[col] * float(equity[col].iloc[-1]) for col in non_bench}
 
-        # true pre-return starting capital for display; self.initial_book_cap already has the book's first-bar
-        # return compounded in (no anchor row precedes it), so look one bar further back in the book's raw history
-        # when available (falls back when the book has no lead-in data before the analysis window, e.g. synthetic data)
+        # true pre-return starting capital just for display (when available)
         book_loc = self.book.index.get_loc(self.df.index[0])
         display_book_cap = float(self.book.iloc[book_loc - 1]) if book_loc > 0 else self.initial_book_cap
-        total_aum_initial = {col: (self.portfolio.aum if col == "strat" else display_book_cap) for col in non_bench}
+        total_aum_initial = {col: self.portfolio.aum if col == "strat" else display_book_cap for col in non_bench}
 
         strategy_aum_initial = {"combined": self._naive_w * self.initial_book_cap, "optimised": self._opt_w * self.initial_book_cap}
         strategy_aum_final = {col: total_aum_final[col] * strategy_weight[col] for col in new_strats}
