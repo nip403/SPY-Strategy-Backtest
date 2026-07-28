@@ -54,7 +54,7 @@ def test_full_pipeline_runs_for_every_real_strategy(strategy_cls, synthetic_ohlc
     assert not np.isnan(p.df["net_ret"]).any()
 
 @pytest.mark.slow
-def test_sharpe_curve_with_dynamic_cost_and_capped_execution_smoke(synthetic_ohlcv):
+def test_sharpe_curve_with_dynamic_cost_and_capped_execution_smoke(synthetic_ohlcv, captured_figures):
     """Mirrors main.ipynb's capacity-analysis cells: DynamicCostModel combined with each
     capped-participation execution model, plus a non-default strategy."""
 
@@ -65,10 +65,11 @@ def test_sharpe_curve_with_dynamic_cost_and_capped_execution_smoke(synthetic_ohl
     Portfolio.sharpe_curve(df=df, max_aum=1e8, resolution=5, cost_model=DynamicCostModel(), execution_model=CappedVolumeExecution())
     Portfolio.sharpe_curve(df=df, max_aum=1e8, resolution=5, strategy_model=QuarterHourSampleStrategy(), cost_model=DynamicCostModel(), execution_model=CappedVolumeExecution())
 
-    assert len(plt.get_fignums()) == figs_before + 3
+    assert len(captured_figures) == 3
+    assert len(plt.get_fignums()) == figs_before
 
 @pytest.mark.slow
-def test_strategy_connector_full_pipeline_smoke(synthetic_ohlcv, random_seed):
+def test_strategy_connector_full_pipeline_smoke(synthetic_ohlcv, random_seed, captured_figures):
     df = synthetic_ohlcv(n_days=30)
 
     p = Portfolio(df, cost_model=DynamicCostModel(), long_permissions=False)
@@ -87,7 +88,8 @@ def test_strategy_connector_full_pipeline_smoke(synthetic_ohlcv, random_seed):
     figs_before = len(plt.get_fignums())
     sc.report()
 
-    assert len(plt.get_fignums()) > figs_before
+    assert len(captured_figures) == 1
+    assert len(plt.get_fignums()) == figs_before
     assert isinstance(str(sc), str)
 
 # ---- AUM-sweep vectorization equivalence -------------------------------------
