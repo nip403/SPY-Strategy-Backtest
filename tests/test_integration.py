@@ -68,7 +68,7 @@ def test_sharpe_curve_with_dynamic_cost_and_capped_execution_smoke(synthetic_ohl
     assert len(plt.get_fignums()) == figs_before + 3
 
 @pytest.mark.slow
-def test_strategy_connector_full_pipeline_smoke(synthetic_ohlcv):
+def test_strategy_connector_full_pipeline_smoke(synthetic_ohlcv, random_seed):
     df = synthetic_ohlcv(n_days=30)
 
     p = Portfolio(df, cost_model=DynamicCostModel(), long_permissions=False)
@@ -79,7 +79,7 @@ def test_strategy_connector_full_pipeline_smoke(synthetic_ohlcv):
         volatility=0.18,
         beta=0.9,
         benchmark=df["close"],
-        random_seed=1,
+        random_seed=random_seed,
     )
 
     sc = StrategyConnector(p, toy_book, df["close"])

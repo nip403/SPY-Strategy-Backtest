@@ -24,12 +24,24 @@ def _no_gui_backend():
     yield
     mp.undo()
 
+# ---- randomized, independently-repeated test data ---------------------------
+
+@pytest.fixture(params=[11, 47, 89, 131, 197], ids=lambda s: f"seed{s}")
+def random_seed(request) -> int:
+    """Fixed, diverse seeds: every test that consumes synthetic data (directly or via
+    portfolio_factory) runs once per seed against a genuinely different random dataset, each an
+    independent pass/fail. Fixed rather than freshly randomized per collection so a failing case
+    is reproducible by its pytest id (e.g. test_foo[seed47])."""
+
+    return request.param
+
 # ---- synthetic market data --------------------------------------------------
 
 @pytest.fixture
-def synthetic_ohlcv():
-    """Factory: build a deterministic minute-level OHLCV DataFrame shaped like data._preprocess()'s
-    output (tz-aware America/New_York index, columns open/high/low/close/volume/time, 390 bars/day).
+def synthetic_ohlcv(random_seed):
+    """Factory: build a minute-level OHLCV DataFrame shaped like data._preprocess()'s output
+    (tz-aware America/New_York index, columns open/high/low/close/volume/time, 390 bars/day).
+    Defaults to the randomized per-run seed; pass seed= explicitly to pin an exact dataset.
 
     Note: Portfolio._preprocess's "sigma"/"std" need a 14-trading-day rolling warmup, so pass
     n_days >= 20 whenever a test needs live (non-NaN) signals from the real strategy classes.
@@ -38,13 +50,13 @@ def synthetic_ohlcv():
     def _make(
         n_days: int = 20,
         *,
-        seed: int = 7,
+        seed: int | None = None,
         start: str = "2024-01-02",
         start_price: float = 400.0,
         minute_vol: float = 0.0005,
         avg_volume: int = 500_000,
     ) -> pd.DataFrame:
-        rng = np.random.default_rng(seed)
+        rng = np.random.default_rng(random_seed if seed is None else seed)
 
         days = pd.bdate_range(start, periods=n_days)
         minute_offsets = pd.to_timedelta(np.arange(390), unit="m") + pd.Timedelta(hours=9, minutes=30)
@@ -106,12 +118,13 @@ def cycling_strategy() -> CyclingStrategy:
 @pytest.fixture
 def portfolio_factory(synthetic_ohlcv):
     """Callable returning a configured, already-backtested Portfolio on synthetic data.
-    Defaults to CyclingStrategy (see above) rather than BaseStrategy, for the same reason."""
+    Defaults to CyclingStrategy (see above) rather than BaseStrategy, for the same reason.
+    seed=None (default) defers to synthetic_ohlcv's own randomized per-run seed."""
 
     def _make(
         *,
         n_days: int = 20,
-        seed: int = 7,
+        seed: int | None = None,
         aum: float = 100_000,
         target_vol: float = 0.02,
         long_permissions: bool = True,

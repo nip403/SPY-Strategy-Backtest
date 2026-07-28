@@ -162,39 +162,39 @@ def test_generate_toy_equity_raises_without_return_or_sharpe(portfolio_factory):
     with pytest.raises(ValueError):
         generate_toy_equity(portfolio=portfolio)
 
-def test_generate_toy_equity_no_benchmark_scalar_returns_equity_valid_tuple(portfolio_factory):
+def test_generate_toy_equity_no_benchmark_scalar_returns_equity_valid_tuple(portfolio_factory, random_seed):
     # regression: this branch used to return a bare equity object with no validity mask,
     # despite the docstring/type hint promising an (equity, valid) tuple like the with-benchmark
     # branch always gave - fixed to match the documented contract.
     portfolio = portfolio_factory()
-    equity, valid = generate_toy_equity(portfolio=portfolio, sharpe=1.0, volatility=0.15, random_seed=1)
+    equity, valid = generate_toy_equity(portfolio=portfolio, sharpe=1.0, volatility=0.15, random_seed=random_seed)
 
     assert isinstance(equity, pd.Series)
     assert equity.index.equals(portfolio.df.index)
     np.testing.assert_array_equal(valid, [True])
 
-def test_generate_toy_equity_no_benchmark_vectorised_output_shape_and_labels(portfolio_factory):
+def test_generate_toy_equity_no_benchmark_vectorised_output_shape_and_labels(portfolio_factory, random_seed):
     # regression: this branch used to build the DataFrame with no explicit `columns=`, giving
     # plain integer columns (0,1,2,...) instead of the "S:.../σ:.../β:..." labels the
     # with-benchmark branch always produced - fixed to label consistently.
     portfolio = portfolio_factory()
-    equity, valid = generate_toy_equity(portfolio=portfolio, sharpe=np.array([0.5, 1.0, 1.5]), volatility=0.15, random_seed=1)
+    equity, valid = generate_toy_equity(portfolio=portfolio, sharpe=np.array([0.5, 1.0, 1.5]), volatility=0.15, random_seed=random_seed)
 
     assert isinstance(equity, pd.DataFrame)
     assert equity.shape == (len(portfolio.df), 3)
     assert list(equity.columns) == ["S:0.5|σ:0.150|β:0.0", "S:1.0|σ:0.150|β:0.0", "S:1.5|σ:0.150|β:0.0"]
     np.testing.assert_array_equal(valid, [True, True, True])
 
-def test_generate_toy_equity_with_benchmark_returns_equity_valid_tuple(portfolio_factory):
+def test_generate_toy_equity_with_benchmark_returns_equity_valid_tuple(portfolio_factory, random_seed):
     portfolio = portfolio_factory()
     benchmark = portfolio.df["close"]
-    equity, valid = generate_toy_equity(portfolio=portfolio, sharpe=1.0, volatility=0.15, beta=0.5, benchmark=benchmark, random_seed=1)
+    equity, valid = generate_toy_equity(portfolio=portfolio, sharpe=1.0, volatility=0.15, beta=0.5, benchmark=benchmark, random_seed=random_seed)
 
     assert isinstance(equity, pd.Series)
     assert equity.index.equals(portfolio.df.index)
     assert valid.all()
 
-def test_generate_toy_equity_impossible_beta_vol_combo_warns_and_drops(portfolio_factory):
+def test_generate_toy_equity_impossible_beta_vol_combo_warns_and_drops(portfolio_factory, random_seed):
     portfolio = portfolio_factory()
     benchmark = portfolio.df["close"]
 
@@ -202,34 +202,34 @@ def test_generate_toy_equity_impossible_beta_vol_combo_warns_and_drops(portfolio
     with pytest.warns(UserWarning):
         equity, valid = generate_toy_equity(
             portfolio=portfolio, sharpe=np.array([1.0, 1.0]), volatility=0.05,
-            beta=np.array([5.0, 0.0]), benchmark=benchmark, random_seed=1,
+            beta=np.array([5.0, 0.0]), benchmark=benchmark, random_seed=random_seed,
         )
 
     assert valid.tolist() == [False, True]
     assert equity.shape[1] == 1
 
-def test_generate_toy_equity_all_invalid_combos_raises_valueerror(portfolio_factory):
+def test_generate_toy_equity_all_invalid_combos_raises_valueerror(portfolio_factory, random_seed):
     portfolio = portfolio_factory()
     benchmark = portfolio.df["close"]
 
     with pytest.raises(ValueError):
         generate_toy_equity(
             portfolio=portfolio, sharpe=np.array([1.0]), volatility=0.001,
-            beta=np.array([50.0]), benchmark=benchmark, random_seed=1,
+            beta=np.array([50.0]), benchmark=benchmark, random_seed=random_seed,
         )
 
-def test_generate_toy_equity_expected_return_kwarg_path(portfolio_factory):
+def test_generate_toy_equity_expected_return_kwarg_path(portfolio_factory, random_seed):
     # expected_return= is mutually exclusive with sharpe= (used when sharpe is left None)
     portfolio = portfolio_factory()
-    equity, valid = generate_toy_equity(portfolio=portfolio, expected_return=0.1, volatility=0.15, random_seed=1)
+    equity, valid = generate_toy_equity(portfolio=portfolio, expected_return=0.1, volatility=0.15, random_seed=random_seed)
 
     assert isinstance(equity, pd.Series)
     assert valid.all()
 
-def test_generate_toy_equity_non_broadcastable_shapes_raises_valueerror(portfolio_factory):
+def test_generate_toy_equity_non_broadcastable_shapes_raises_valueerror(portfolio_factory, random_seed):
     # expected_return= (unlike sharpe=) skips the sharpe*volatility multiplication, so this
     # reaches np.broadcast_arrays directly rather than raising numpy's raw error a step earlier
     portfolio = portfolio_factory()
 
     with pytest.raises(ValueError):
-        generate_toy_equity(portfolio=portfolio, expected_return=np.array([0.1, 0.15, 0.2]), volatility=np.array([0.1, 0.2]), random_seed=1)
+        generate_toy_equity(portfolio=portfolio, expected_return=np.array([0.1, 0.15, 0.2]), volatility=np.array([0.1, 0.2]), random_seed=random_seed)

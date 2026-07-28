@@ -13,9 +13,9 @@ from backtest_engine.analysis.connector import StrategyConnector
 from backtest_engine.utils import generate_toy_equity
 
 @pytest.fixture
-def connector(portfolio_factory) -> StrategyConnector:
+def connector(portfolio_factory, random_seed) -> StrategyConnector:
     portfolio = portfolio_factory(n_days=25)
-    book, _ = generate_toy_equity(portfolio=portfolio, sharpe=1.0, volatility=0.15, beta=0.5, benchmark=portfolio.df["close"], random_seed=1)
+    book, _ = generate_toy_equity(portfolio=portfolio, sharpe=1.0, volatility=0.15, beta=0.5, benchmark=portfolio.df["close"], random_seed=random_seed)
     return StrategyConnector(portfolio, book, portfolio.df["close"])
 
 def test_returns_intersect_strategy_book_benchmark_indices(connector, portfolio_factory):
@@ -33,20 +33,20 @@ def test_optimised_weight_within_zero_one_bounds(connector):
 def test_has_long_leg_true_for_default_mixed_strategy(connector):
     assert connector._has_long_leg is True
 
-def test_has_long_leg_false_for_short_only_strategy(portfolio_factory):
+def test_has_long_leg_false_for_short_only_strategy(portfolio_factory, random_seed):
     portfolio = portfolio_factory(n_days=25, long_permissions=False)
-    book, _ = generate_toy_equity(portfolio=portfolio, sharpe=1.0, volatility=0.15, beta=0.5, benchmark=portfolio.df["close"], random_seed=1)
+    book, _ = generate_toy_equity(portfolio=portfolio, sharpe=1.0, volatility=0.15, beta=0.5, benchmark=portfolio.df["close"], random_seed=random_seed)
     sc = StrategyConnector(portfolio, book, portfolio.df["close"])
 
     assert sc._has_long_leg is False
 
-def test_short_only_combined_growth_matches_book_plus_additive_short(portfolio_factory):
+def test_short_only_combined_growth_matches_book_plus_additive_short(portfolio_factory, random_seed):
     # single-rebalance-block approximation: rebalance_period=20 < 25 days means 2 blocks (each
     # re-based to the mixed portfolio's own growth at that point), so this is a loose sanity
     # check on magnitude/direction, not exact - exact formula correctness is covered by the
     # hand-derived _mix_returns unit tests above
     portfolio = portfolio_factory(n_days=25, long_permissions=False)
-    book, _ = generate_toy_equity(portfolio=portfolio, sharpe=1.0, volatility=0.15, beta=0.5, benchmark=portfolio.df["close"], random_seed=1)
+    book, _ = generate_toy_equity(portfolio=portfolio, sharpe=1.0, volatility=0.15, beta=0.5, benchmark=portfolio.df["close"], random_seed=random_seed)
     sc = StrategyConnector(portfolio, book, portfolio.df["close"])
 
     w = sc._naive_w
@@ -153,9 +153,9 @@ def test_extras_populated_after_init(connector):
     assert isinstance(connector.extras, ConnectorExtras)
     assert set(connector.extras.strategy_weight.keys()) == {"combined", "optimised"}
 
-def test_cvar_monte_carlo_seeded_reproducible_across_runs(portfolio_factory):
+def test_cvar_monte_carlo_seeded_reproducible_across_runs(portfolio_factory, random_seed):
     portfolio = portfolio_factory(n_days=25)
-    book, _ = generate_toy_equity(portfolio=portfolio, sharpe=1.0, volatility=0.15, beta=0.5, benchmark=portfolio.df["close"], random_seed=1)
+    book, _ = generate_toy_equity(portfolio=portfolio, sharpe=1.0, volatility=0.15, beta=0.5, benchmark=portfolio.df["close"], random_seed=random_seed)
 
     sc1 = StrategyConnector(portfolio, book, portfolio.df["close"])
     sc2 = StrategyConnector(portfolio, book, portfolio.df["close"])
