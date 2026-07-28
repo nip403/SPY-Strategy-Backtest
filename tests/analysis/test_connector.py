@@ -164,16 +164,18 @@ def test_cvar_monte_carlo_seeded_reproducible_across_runs(portfolio_factory, ran
 
 # ---- plot / str / report ------------------------------------------------
 
-def test_plot_creates_single_figure(connector):
+def test_plot_shows_and_closes_figure(connector, captured_figures):
     figs_before = len(plt.get_fignums())
     connector.plot()
 
-    assert len(plt.get_fignums()) == figs_before + 1
+    assert len(captured_figures) == 1
+    assert len(plt.get_fignums()) == figs_before
 
-def test_plot_savepath_saves_and_closes_figure(connector, tmp_path):
+def test_plot_savepath_saves_and_closes_figure(connector, captured_figures, tmp_path):
     figs_before = len(plt.get_fignums())
     connector.plot(savepath=tmp_path)
 
+    assert len(captured_figures) == 1
     assert len(plt.get_fignums()) == figs_before
 
     created = list(tmp_path.iterdir())
@@ -194,12 +196,13 @@ def test_str_contains_incremental_and_other_sections(connector):
     assert "Incremental Sharpe (Marginal)" in text
     assert "Incremental Sharpe (Realised)" in text
 
-def test_report_plots_and_prints(connector):
+def test_report_plots_and_prints(connector, captured_figures):
     figs_before = len(plt.get_fignums())
     buf = io.StringIO()
 
     with redirect_stdout(buf):
         connector.report()
 
-    assert len(plt.get_fignums()) == figs_before + 1
+    assert len(captured_figures) == 1
+    assert len(plt.get_fignums()) == figs_before
     assert "Sharpe Ratio" in buf.getvalue()

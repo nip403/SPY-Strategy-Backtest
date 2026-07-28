@@ -368,6 +368,8 @@ class StrategyConnector(AnalysisReport):
         if savepath is not None:
             save_figures({"integration_overview": fig}, type(self).__name__, savepath)
 
+        plt.close(fig)
+
     def __str__(self) -> str:
         """
         Return integration and risk metrics.

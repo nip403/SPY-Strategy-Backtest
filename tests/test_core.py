@@ -193,15 +193,16 @@ def test_report_plot_false_creates_no_figures_and_prints_nothing(portfolio_facto
     assert len(plt.get_fignums()) == figs_before
     assert buf.getvalue() == ""
 
-def test_report_plot_true_period_mode_creates_two_figures(portfolio_factory):
+def test_report_plot_true_period_mode_shows_and_closes_two_figures(portfolio_factory, captured_figures):
     p = portfolio_factory()
 
     figs_before = len(plt.get_fignums())
     p.report(plot=True)
 
-    assert len(plt.get_fignums()) == figs_before + 2
+    assert len(captured_figures) == 2
+    assert len(plt.get_fignums()) == figs_before
 
-def test_report_plot_true_decompose_mode_skips_manual_chart_defers_to_decomposer(portfolio_factory):
+def test_report_plot_true_decompose_mode_skips_manual_chart_defers_to_decomposer(portfolio_factory, captured_figures):
     p = portfolio_factory()
 
     figs_before = len(plt.get_fignums())
@@ -209,7 +210,8 @@ def test_report_plot_true_decompose_mode_skips_manual_chart_defers_to_decomposer
 
     # decompose=True suppresses the ad-hoc equity plot block entirely; PortfolioDecomposer.report()
     # (which itself renders 2 figures) is the sole source of figures in this branch
-    assert len(plt.get_fignums()) == figs_before + 2
+    assert len(captured_figures) == 2
+    assert len(plt.get_fignums()) == figs_before
 
 def test_report_day_plot_true_prints_snapshot(portfolio_factory):
     p = portfolio_factory()
@@ -232,12 +234,13 @@ def test_report_day_plot_false_prints_nothing(portfolio_factory):
 
 # ---- savepath --------------------------------------------------------
 
-def test_report_period_mode_savepath_saves_two_sibling_directories_and_closes_figures(portfolio_factory, tmp_path):
+def test_report_period_mode_savepath_saves_two_sibling_directories_and_closes_figures(portfolio_factory, captured_figures, tmp_path):
     p = portfolio_factory()
 
     figs_before = len(plt.get_fignums())
     p.report(plot=True, savepath=tmp_path)
 
+    assert len(captured_figures) == 2
     assert len(plt.get_fignums()) == figs_before
 
     created = sorted(p.name for p in tmp_path.iterdir())
@@ -245,38 +248,32 @@ def test_report_period_mode_savepath_saves_two_sibling_directories_and_closes_fi
     assert created[0].startswith("Portfolio_")
     assert created[1].startswith("Tearsheet_")
 
-def test_report_decompose_mode_savepath_saves_decomposer_directory_only(portfolio_factory, tmp_path):
+def test_report_decompose_mode_savepath_saves_decomposer_directory_only(portfolio_factory, captured_figures, tmp_path):
     p = portfolio_factory()
 
     figs_before = len(plt.get_fignums())
     p.report(decompose=True, plot=True, savepath=tmp_path)
 
+    assert len(captured_figures) == 2
     assert len(plt.get_fignums()) == figs_before
 
     created = list(tmp_path.iterdir())
     assert len(created) == 1
     assert created[0].name.startswith("PortfolioDecomposer_")
 
-def test_report_day_mode_savepath_saves_and_closes_figure(portfolio_factory, tmp_path):
+def test_report_day_mode_savepath_saves_and_closes_figure(portfolio_factory, captured_figures, tmp_path):
     p = portfolio_factory()
 
     figs_before = len(plt.get_fignums())
     p.report(day=p.t0, plot=True, savepath=tmp_path)
 
+    assert len(captured_figures) == 1
     assert len(plt.get_fignums()) == figs_before
 
     created = list(tmp_path.iterdir())
     assert len(created) == 1
     assert created[0].name.startswith("Portfolio_")
     assert (created[0] / "noise_area_and_leverage.png").exists()
-
-def test_report_savepath_none_leaves_figures_open(portfolio_factory):
-    p = portfolio_factory()
-
-    figs_before = len(plt.get_fignums())
-    p.report(plot=True, savepath=None)
-
-    assert len(plt.get_fignums()) == figs_before + 2
 
 # ---- __str__ --------------------------------------------------------
 
@@ -293,19 +290,20 @@ def test_str_contains_aum_sharpe_and_period(portfolio_factory):
 # ---- sharpe_curve --------------------------------------------------------
 
 class TestSharpeCurve:
-    def test_runs_and_creates_one_figure(self, synthetic_ohlcv, cycling_strategy):
+    def test_runs_shows_and_closes_one_figure(self, synthetic_ohlcv, cycling_strategy, captured_figures):
         df = synthetic_ohlcv(n_days=20)
 
         figs_before = len(plt.get_fignums())
         Portfolio.sharpe_curve(df=df, strategy_model=cycling_strategy, min_aum=1e4, max_aum=1e8, resolution=5)
 
-        assert len(plt.get_fignums()) == figs_before + 1
+        assert len(captured_figures) == 1
+        assert len(plt.get_fignums()) == figs_before
 
-    def test_legend_has_exactly_three_entries_in_order(self, synthetic_ohlcv, cycling_strategy):
+    def test_legend_has_exactly_three_entries_in_order(self, synthetic_ohlcv, cycling_strategy, captured_figures):
         df = synthetic_ohlcv(n_days=20)
         Portfolio.sharpe_curve(df=df, strategy_model=cycling_strategy, min_aum=1e4, max_aum=1e8, resolution=5)
 
-        ax = plt.gcf().axes[0]
+        ax = captured_figures[-1].axes[0]
         labels = [t.get_text() for t in ax.get_legend().get_texts()]
 
         assert len(labels) == 3
@@ -313,11 +311,11 @@ class TestSharpeCurve:
         assert labels[1].startswith("Base (AUM=")
         assert labels[2] == "Risk Free"
 
-    def test_base_legend_aum_format_one_decimal_no_plus_sign(self, synthetic_ohlcv, cycling_strategy):
+    def test_base_legend_aum_format_one_decimal_no_plus_sign(self, synthetic_ohlcv, cycling_strategy, captured_figures):
         df = synthetic_ohlcv(n_days=20)
         Portfolio.sharpe_curve(df=df, strategy_model=cycling_strategy, min_aum=1e4, max_aum=1e8, resolution=5)
 
-        ax = plt.gcf().axes[0]
+        ax = captured_figures[-1].axes[0]
         base_label = next(t.get_text() for t in ax.get_legend().get_texts() if t.get_text().startswith("Base"))
         inner = base_label.split("AUM=", 1)[1].rstrip(")")
 
@@ -327,56 +325,49 @@ class TestSharpeCurve:
             assert len(mantissa.split(".")[1]) == 1
             assert exp.lstrip("-").isdigit()
 
-    def test_no_minor_xticks(self, synthetic_ohlcv, cycling_strategy):
+    def test_no_minor_xticks(self, synthetic_ohlcv, cycling_strategy, captured_figures):
         df = synthetic_ohlcv(n_days=20)
         Portfolio.sharpe_curve(df=df, strategy_model=cycling_strategy, min_aum=1e4, max_aum=1e8, resolution=5)
 
-        ax = plt.gcf().axes[0]
+        ax = captured_figures[-1].axes[0]
         assert len(ax.xaxis.get_minorticklocs()) == 0
 
-    def test_base_aum_not_on_grid_gets_merged_in(self, synthetic_ohlcv, cycling_strategy):
+    def test_base_aum_not_on_grid_gets_merged_in(self, synthetic_ohlcv, cycling_strategy, captured_figures):
         # 2e5 falls between resolution=5's sampled points (1,3,5,7,9 x 10^k), forcing the
         # "append base_aum and re-sort" branch rather than reusing an existing grid point
         df = synthetic_ohlcv(n_days=20)
 
         Portfolio.sharpe_curve(df=df, strategy_model=cycling_strategy, min_aum=1e4, max_aum=1e8, resolution=5, base_aum=2e5)
 
-        ax = plt.gcf().axes[0]
+        ax = captured_figures[-1].axes[0]
         assert ax.get_legend() is not None
 
-    def test_base_aum_out_of_range_is_clipped_not_erroring(self, synthetic_ohlcv, cycling_strategy):
+    def test_base_aum_out_of_range_is_clipped_not_erroring(self, synthetic_ohlcv, cycling_strategy, captured_figures):
         df = synthetic_ohlcv(n_days=20)
 
         Portfolio.sharpe_curve(df=df, strategy_model=cycling_strategy, min_aum=1e4, max_aum=1e8, resolution=5, base_aum=1e20)
 
-        assert plt.gcf().axes[0].get_legend() is not None
+        assert captured_figures[-1].axes[0].get_legend() is not None
 
-    def test_axis_labels_and_title(self, synthetic_ohlcv, cycling_strategy):
+    def test_axis_labels_and_title(self, synthetic_ohlcv, cycling_strategy, captured_figures):
         df = synthetic_ohlcv(n_days=20)
         Portfolio.sharpe_curve(df=df, strategy_model=cycling_strategy, min_aum=1e4, max_aum=1e8, resolution=5)
 
-        ax = plt.gcf().axes[0]
+        ax = captured_figures[-1].axes[0]
         assert ax.get_xlabel() == "AUM ($, Piecewise-Linear-Scaled)"
         assert ax.get_ylabel() == "Sharpe Ratio"
         assert "Capacity: Sharpe vs AUM" in ax.get_title()
 
-    def test_savepath_saves_and_closes_figure(self, synthetic_ohlcv, cycling_strategy, tmp_path):
+    def test_savepath_saves_and_closes_figure(self, synthetic_ohlcv, cycling_strategy, captured_figures, tmp_path):
         df = synthetic_ohlcv(n_days=20)
 
         figs_before = len(plt.get_fignums())
         Portfolio.sharpe_curve(df=df, strategy_model=cycling_strategy, min_aum=1e4, max_aum=1e8, resolution=5, savepath=tmp_path)
 
+        assert len(captured_figures) == 1
         assert len(plt.get_fignums()) == figs_before
 
         created = list(tmp_path.iterdir())
         assert len(created) == 1
         assert created[0].name.startswith("Portfolio_")
         assert (created[0] / "sharpe_capacity_curve.png").exists()
-
-    def test_savepath_none_leaves_figure_open(self, synthetic_ohlcv, cycling_strategy):
-        df = synthetic_ohlcv(n_days=20)
-
-        figs_before = len(plt.get_fignums())
-        Portfolio.sharpe_curve(df=df, strategy_model=cycling_strategy, min_aum=1e4, max_aum=1e8, resolution=5)
-
-        assert len(plt.get_fignums()) == figs_before + 1

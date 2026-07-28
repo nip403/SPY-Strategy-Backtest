@@ -32,6 +32,19 @@ def _no_gui_backend():
     yield
     mp.undo()
 
+@pytest.fixture
+def captured_figures(monkeypatch):
+    """plot()/report() methods close their own figures internally, so plt.gcf()/get_fignums()
+    can't be used after the call to confirm a figure was shown or to inspect its content. This
+    layers a function-scoped override on top of _no_gui_backend's session-scoped no-op plt.show,
+    additionally stashing the current figure before it gets closed. Use captured_figures[-1] (or
+    [-N:] for multi-figure methods) in place of plt.gcf()."""
+
+    captured = []
+    monkeypatch.setattr(plt, "show", lambda *a, **k: captured.append(plt.gcf()))
+
+    return captured
+
 # ---- randomized, independently-repeated test data ---------------------------
 
 @pytest.fixture(params=[11, 47, 89, 131, 197], ids=lambda s: f"seed{s}")

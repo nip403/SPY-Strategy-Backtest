@@ -78,6 +78,8 @@ class Tearsheet(AnalysisReport):
         if savepath is not None:
             save_figures({"daily_returns_distribution": fig}, type(self).__name__, savepath)
 
+        plt.close(fig)
+
     def __str__(self) -> str:
         """
         Return a formatted text tearsheet summary.

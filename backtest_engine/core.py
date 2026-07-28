@@ -252,6 +252,8 @@ class Portfolio:
         if savepath is not None:
             save_figures({"sharpe_capacity_curve": fig}, cls.__name__, savepath)
 
+        plt.close(fig)
+
     def _aggregate(self) -> pd.DataFrame:
         """
         Aggregate intraday results into daily performance statistics for internal reporting.
@@ -361,6 +363,8 @@ class Portfolio:
             if savepath is not None:
                 save_figures({"equity_curve": fig}, type(self).__name__, savepath)
 
+            plt.close(fig)
+
         sliced = self.stats[start:end].copy()
         sliced[["strat_equity", "bench_equity"]] *= self.aum / sliced[["strat_equity", "bench_equity"]].iloc[0].values
 
@@ -440,6 +444,8 @@ class Portfolio:
 
             if savepath is not None:
                 save_figures({"noise_area_and_leverage": fig}, type(self).__name__, savepath)
+
+            plt.close(fig)
 
         snapshot = DailySnapshot(
             strat_cum_return=self.stats.loc[dt]["strat_ret"],

@@ -239,6 +239,9 @@ class PortfolioDecomposer(AnalysisReport):
         if savepath is not None:
             save_figures({"equity_curves": fig1, "returns_distributions": fig2}, type(self).__name__, savepath)
 
+        plt.close(fig1)
+        plt.close(fig2)
+
     def __str__(self) -> str:
         """
         Format decomposition tearsheets as a comparison table.

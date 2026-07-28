@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
@@ -49,7 +50,10 @@ class CapacityEstimator(AnalysisReport):
         self.delays = np.arange(max_delay + 1)
         self.decay_curve = np.array([float((position.where(runs >= d, 0).shift(1).fillna(0) * ret).sum()) for d in self.delays])
 
-        # assumes positive base return
+        if self.decay_curve[0] <= 0:
+            warnings.warn("Base portfolio return is non-positive - no meaningful capacity can be derived. Terminating CapacityEstimator.")
+            return
+
         self.decay_ratio = self.decay_curve / self.decay_curve[0]
         crossed = np.flatnonzero(self.decay_ratio <= decay_threshold)
 
@@ -136,6 +140,8 @@ class CapacityEstimator(AnalysisReport):
 
         if savepath is not None:
             save_figures({"alpha_decay_and_sharpe": fig}, type(self).__name__, savepath)
+
+        plt.close(fig)
 
     def __str__(self) -> str:
         """

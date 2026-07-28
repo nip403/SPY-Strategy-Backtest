@@ -75,16 +75,18 @@ def test_long_short_split_correctly_isolates_exposure(portfolio_factory):
     assert decomp.components["short"].trades.total_trades == 0
     assert decomp.components["long"].trades.total_trades > 0
 
-def test_plot_creates_two_figures(decomposer):
+def test_plot_shows_and_closes_two_figures(decomposer, captured_figures):
     figs_before = len(plt.get_fignums())
     decomposer.plot()
 
-    assert len(plt.get_fignums()) == figs_before + 2
+    assert len(captured_figures) == 2
+    assert len(plt.get_fignums()) == figs_before
 
-def test_plot_savepath_saves_and_closes_figures(decomposer, tmp_path):
+def test_plot_savepath_saves_and_closes_figures(decomposer, captured_figures, tmp_path):
     figs_before = len(plt.get_fignums())
     decomposer.plot(savepath=tmp_path)
 
+    assert len(captured_figures) == 2
     assert len(plt.get_fignums()) == figs_before
 
     created = list(tmp_path.iterdir())
@@ -100,12 +102,13 @@ def test_str_reports_four_columns_and_no_stale_label_typo(decomposer):
 
     assert "Strat_Long" not in text  # regression: old copy-paste label bug
 
-def test_report_plots_and_prints(decomposer):
+def test_report_plots_and_prints(decomposer, captured_figures):
     figs_before = len(plt.get_fignums())
     buf = io.StringIO()
 
     with redirect_stdout(buf):
         decomposer.report()
 
-    assert len(plt.get_fignums()) == figs_before + 2
+    assert len(captured_figures) == 2
+    assert len(plt.get_fignums()) == figs_before
     assert "Long-Only" in buf.getvalue()
