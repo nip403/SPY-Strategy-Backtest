@@ -12,6 +12,14 @@ import pytest
 from backtest_engine import Portfolio
 from backtest_engine.components.base import BacktestContext, StrategyComponent
 
+def pytest_collection_modifyitems(items):
+    """Auto-mark every test not already marked "slow" as "fast", so `-m "fast"` selects the
+    quick loop without needing every test individually decorated."""
+
+    for item in items:
+        if "slow" not in item.keywords:
+            item.add_marker("fast")
+
 # ---- no-GUI guard ----------------------------------------------------------
 
 @pytest.fixture(scope="session", autouse=True)
