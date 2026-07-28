@@ -37,13 +37,11 @@ Alpaca API credentials are required for live data pulls (`data.request`); cached
 ## Testing
 
 ```powershell
-py -3.12 -m pip install -e ".[dev]"   # editable install + pytest/pytest-cov
-py -3.12 -m pytest                    # full suite, randomized (~2.5 min)
-py -3.12 -m pytest -m "fast"          # fast loop, skips heavier integration tests (~2 min)
-py -3.12 -m pytest --cov=backtest_engine --cov-report=term-missing   # ~5 min
+py -3.12 -m pip install -e ".[dev]"                                  # editable install + pytest/pytest-cov
+py -3.12 -m pytest                                                   # full suite, randomised
+py -3.12 -m pytest -m "fast"                                         # fast loop, skips heavier tests
+py -3.12 -m pytest --cov=backtest_engine --cov-report=term-missing   # coverage report
 ```
-
-Requires Python 3.12+. Synthetic test data is randomized across 5 fixed seeds per test (`tests/conftest.py`'s `random_seed` fixture) — each test runs 5x against independent random datasets, and a failure on one is reproducible via its pytest id, e.g. `pytest -k seed47`.
 
 ### Todo
 
