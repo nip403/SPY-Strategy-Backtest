@@ -4,6 +4,7 @@ import io
 from contextlib import redirect_stdout
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pytest
 
 from backtest_engine.components.base import StrategyComponent
@@ -14,6 +15,39 @@ from backtest_engine.analysis.decomposition import PortfolioDecomposer
 def decomposer(portfolio_factory) -> PortfolioDecomposer:
     portfolio = portfolio_factory()
     return PortfolioDecomposer(portfolio, portfolio.t0, portfolio.t1)
+
+# ---- split_long_short ----------------------------------------------------
+
+def test_split_long_short_hand_derived_with_sign_flip():
+    # bar 0: long entry; bar 1: flips long->short (crosses both legs in one trade); bar 2: holds short
+    position = np.array([1.0, -0.5, -0.5]).reshape(-1, 1)
+    ret = np.array([0.01, 0.02, -0.01]).reshape(-1, 1)
+    gross = np.array([0.0, 0.02, 0.005]).reshape(-1, 1)  # shift(position,1)*ret
+    net = np.array([0.0, 0.017, 0.005]).reshape(-1, 1)   # cost of 0.003 charged only at the flip bar
+
+    legs = PortfolioDecomposer.split_long_short(position, ret, gross, net)
+
+    np.testing.assert_allclose(legs["long"]["position"][:, 0], [1.0, 0.0, 0.0])
+    np.testing.assert_allclose(legs["short"]["position"][:, 0], [0.0, -0.5, -0.5])
+
+    # flip bar's cost (0.003) splits 2:1 proportional to each leg's own |position change| (1.0 vs 0.5)
+    np.testing.assert_allclose(legs["long"]["net_ret"][:, 0], [0.0, 0.018, 0.0])
+    np.testing.assert_allclose(legs["short"]["net_ret"][:, 0], [0.0, -0.001, 0.005])
+
+    # legs must always recombine to the original combined net_ret (cost is split, never created/destroyed)
+    recombined = legs["long"]["net_ret"] + legs["short"]["net_ret"]
+    np.testing.assert_allclose(recombined, net)
+
+def test_split_long_short_broadcasts_ret_across_scenarios():
+    position = np.array([[1.0, 1.0], [-0.5, -0.5]])
+    ret = np.array([[0.01], [0.02]])
+    gross = np.array([[0.0, 0.0], [0.02, 0.02]])
+    net = np.array([[0.0, 0.0], [0.017, 0.017]])
+
+    legs = PortfolioDecomposer.split_long_short(position, ret, gross, net)
+
+    assert legs["long"]["net_ret"].shape == (2, 2)
+    np.testing.assert_allclose(legs["long"]["net_ret"][:, 0], legs["long"]["net_ret"][:, 1])
 
 def test_components_keyed_strategy_long_short(decomposer):
     assert set(decomposer.components.keys()) == {"strategy", "long", "short"}

@@ -101,6 +101,28 @@ def test_returns_matrix_values_finite_or_nan_only(portfolio_factory):
 
     assert np.all(np.isfinite(matrix) | np.isnan(matrix))
 
+def test_returns_matrix_components_net_matches_returns_matrix(portfolio_factory):
+    p = portfolio_factory()
+    aum = np.array([1e4, 1e5, 1e6])
+
+    position_matrix, gross_matrix, net_matrix = p.returns_matrix_components(aum)
+
+    assert position_matrix.shape == (len(p.df), 3)
+    assert gross_matrix.shape == (len(p.df), 3)
+    assert net_matrix.shape == (len(p.df), 3)
+    np.testing.assert_array_equal(net_matrix, p.returns_matrix(aum))
+
+def test_returns_matrix_components_gross_matches_shifted_position_times_ret(portfolio_factory):
+    p = portfolio_factory()
+    aum = np.array([1e5])
+
+    position_matrix, gross_matrix, _ = p.returns_matrix_components(aum)
+
+    ret = p.df["ret"].to_numpy()[:, None]
+    expected_gross = np.vstack([np.zeros((1, 1)), position_matrix[:-1]]) * ret
+
+    np.testing.assert_array_equal(gross_matrix, expected_gross)
+
 # ---- _aggregate --------------------------------------------------------
 
 def test_aggregate_first_day_return_baselined_on_aum(portfolio_factory):

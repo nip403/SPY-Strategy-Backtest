@@ -12,7 +12,7 @@ def test_all_has_no_duplicates():
     assert len(backtest_engine.__all__) == len(set(backtest_engine.__all__))
 
 def test_core_public_classes_exported():
-    for name in ["Portfolio", "Tearsheet", "PortfolioDecomposer", "StrategyConnector", "AnalysisReport"]:
+    for name in ["Portfolio", "Tearsheet", "PortfolioDecomposer", "StrategyConnector", "CapacityEstimator", "AnalysisReport"]:
         assert name in backtest_engine.__all__
 
 def test_component_abcs_exported():

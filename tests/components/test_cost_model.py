@@ -8,7 +8,7 @@ from backtest_engine.components.base import BacktestContext
 from backtest_engine.components.cost_model import FlatCostModel, DynamicCostModel
 
 def _ctx(aum: float = 1e5) -> BacktestContext:
-    return BacktestContext(aum=aum, target_vol=0.02, long_perm=True, short_perm=True)
+    return BacktestContext(aum=aum, target_vol=0.02, long_perm=True, short_perm=True, max_leverage=4.0)
 
 # ---- FlatCostModel ----------------------------------------------------------
 

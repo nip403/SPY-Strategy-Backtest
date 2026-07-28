@@ -47,9 +47,10 @@ def test_execution_component_default_fill_matrix_tiles_cached_position():
         np.testing.assert_array_equal(matrix[:, col], [1.0, -1.0, 0.0])
 
 def test_backtest_context_stores_all_fields():
-    ctx = BacktestContext(aum=100_000.0, target_vol=0.02, long_perm=True, short_perm=False)
+    ctx = BacktestContext(aum=100_000.0, target_vol=0.02, long_perm=True, short_perm=False, max_leverage=4.0)
 
     assert ctx.aum == 100_000.0
     assert ctx.target_vol == 0.02
     assert ctx.long_perm is True
     assert ctx.short_perm is False
+    assert ctx.max_leverage == 4.0
