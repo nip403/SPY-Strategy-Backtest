@@ -181,10 +181,10 @@ def generate_toy_returns(
             random.setstate(state[1])
         
 @overload
-def generate_toy_equity(*, expected_return: float | np.ndarray = 0, sharpe: None = None, volatility: float | np.ndarray = 0.01, beta: float | np.ndarray = 0, portfolio: Portfolio, benchmark: Optional[pd.Series] = None, distribution: Optional[Callable] = None, random_seed: Optional[int] = 42) -> tuple[pd.Series | pd.DataFrame, np.ndarray]: ...
+def generate_toy_equity(*, expected_return: float | np.ndarray = 0, sharpe: None = None, volatility: float | np.ndarray = 0.01, beta: float | np.ndarray = 0, starting_book_value: int | float = 100_000, portfolio: Portfolio, benchmark: Optional[pd.Series] = None, distribution: Optional[Callable] = None, random_seed: Optional[int] = 42) -> tuple[pd.Series | pd.DataFrame, np.ndarray]: ...
 
 @overload
-def generate_toy_equity(*, expected_return: None = None, sharpe: float | np.ndarray = 0, volatility: float | np.ndarray = 0.01, beta: float | np.ndarray = 0, portfolio: Portfolio, benchmark: Optional[pd.Series] = None, distribution: Optional[Callable] = None, random_seed: Optional[int] = 42) -> tuple[pd.Series | pd.DataFrame, np.ndarray]: ... 
+def generate_toy_equity(*, expected_return: None = None, sharpe: float | np.ndarray = 0, volatility: float | np.ndarray = 0.01, beta: float | np.ndarray = 0, starting_book_value: int | float = 100_000, portfolio: Portfolio, benchmark: Optional[pd.Series] = None, distribution: Optional[Callable] = None, random_seed: Optional[int] = 42) -> tuple[pd.Series | pd.DataFrame, np.ndarray]: ... 
 
 def generate_toy_equity(
     *, 
@@ -192,6 +192,7 @@ def generate_toy_equity(
     sharpe: Optional[float | np.ndarray] = None,
     volatility: float | np.ndarray = 0.01,
     beta: float | np.ndarray = 0,
+    starting_book_value: int | float = 100_000,
     portfolio: Portfolio,
     benchmark: Optional[pd.Series] = None,
     distribution: Optional[Callable] = None,
@@ -215,6 +216,8 @@ def generate_toy_equity(
     beta : float = 0
         Target beta(s) of the synthetic equity to benchmark returns, in expectation
         Ignored if benchmark is None.
+    starting_book_value : int | float = 100_000
+        Scale factor for book equity.
     portfolio : Portfolio
         Portfolio used to determine the intraday index and starting AUM.
     benchmark : pd.Series = None
@@ -264,7 +267,7 @@ def generate_toy_equity(
             **kwargs,
         )
         
-        equity = (1 + returns_matrix).cumprod(axis=0) * portfolio.aum
+        equity = (1 + returns_matrix).cumprod(axis=0) * starting_book_value
         valid = np.ones(expected_return.shape, dtype=bool) # no idiosyncratic-variance constraint applies without a benchmark
 
         labels = [
@@ -338,7 +341,7 @@ def generate_toy_equity(
         **kwargs,
     )
     
-    equity = (1 + beta * benchmark[:, None] + idiosyncratic_returns).cumprod(axis=0) * portfolio.aum
+    equity = (1 + beta * benchmark[:, None] + idiosyncratic_returns).cumprod(axis=0) * starting_book_value
 
     labels = [
         f"{f"S:{r / v if v else 0:.1f}" if sharpe is not None else f"R:{r:.3f}"}|σ:{v:.3f}|β:{b:.1f}"
