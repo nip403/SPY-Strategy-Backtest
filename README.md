@@ -37,10 +37,9 @@ Alpaca API credentials are required for live data pulls (`data.request`); cached
 ## Testing
 
 ```powershell
-py -3.12 -m pip install -e ".[dev]"                                  # editable install + pytest/pytest-cov
 py -3.12 -m pytest                                                   # full suite, randomised
 py -3.12 -m pytest -m "fast"                                         # fast loop, skips heavier tests
-py -3.12 -m pytest --cov=backtest_engine --cov-report=term-missing   # coverage report
+py -3.12 -m pytest --cov=backtest_engine --cov-report=term-missing -ra  # coverage report + extra test summaries
 ```
 
 ### Todo

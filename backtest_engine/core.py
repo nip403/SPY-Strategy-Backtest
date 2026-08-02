@@ -93,18 +93,19 @@ class Portfolio:
             DataFrame containing original data and derived indicators.
         """
 
-        pv = df["volume"] * (df["high"] + df["low"] + df["close"]) / 3 
-        df["vwap"] = pv.groupby(df.index.date).cumsum() / df["volume"].groupby(df.index.date).cumsum()
-    
+        pv = df["volume"] * (df["high"] + df["low"] + df["close"]) / 3
+        df["vwap"] = pv.groupby(pd.Grouper(freq="D")).cumsum() / df["volume"].groupby(pd.Grouper(freq="D")).cumsum()
+
         df["daily_open"] = df.groupby(pd.Grouper(freq="D"))["open"].transform("first")
-    
-        closes = df.groupby(df.index.date)["close"].last()
-        df["prev_close"] = pd.Series(df.index.date, index=df.index).map(closes.shift(1))
+
+        day_key = df.index.floor("D")
+        closes = df["close"].resample("D").last().dropna()
+        df["prev_close"] = day_key.map(closes.shift(1))
 
         # for position sizing
         returns = closes.pct_change()
 
-        df["std"] = pd.Series(df.index.date, index=df.index).map(returns.rolling(window=14).std().shift(1))
+        df["std"] = day_key.map(returns.rolling(window=14).std().shift(1))
         df["ret"] = df["close"].pct_change()
 
         # strategy specific prep - noise area
@@ -262,8 +263,10 @@ class Portfolio:
             Daily strategy and benchmark statistics.
         """
 
-        strat_equity = self.df["equity_curve"].groupby(self.df.index.date).last()
-        bench_equity = self.df["benchmark"].groupby(self.df.index.date).last()
+        days = self.df.index.floor("D").unique()
+
+        strat_equity = self.df["equity_curve"].resample("D").last().loc[days]
+        bench_equity = self.df["benchmark"].resample("D").last().loc[days]
 
         # daily returns
         strat_ret = strat_equity.pct_change()
@@ -277,9 +280,9 @@ class Portfolio:
         bench_dd = compute_drawdown(bench_equity)
 
         # trade count/wins, triggered on trade closes
-        trades = trade_stats(self.df["position"], self.df["net_ret"])[["trade_count", "trade_wins"]].groupby(self.df.index.date).sum().astype(int)
+        trades = trade_stats(self.df["position"], self.df["net_ret"])[["trade_count", "trade_wins"]].resample("D").sum().loc[days].astype(int)
 
-        return pd.DataFrame({
+        result = pd.DataFrame({
             "strat_equity": strat_equity,
             "bench_equity": bench_equity,
             "strat_ret": strat_ret,
@@ -289,6 +292,9 @@ class Portfolio:
             "trade_count": trades["trade_count"],
             "trade_wins": trades["trade_wins"],
         })
+        result.index = result.index.date
+        
+        return result
 
     @property
     def sharpe(self) -> float:

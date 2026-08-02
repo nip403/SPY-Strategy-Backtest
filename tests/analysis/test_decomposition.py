@@ -53,6 +53,15 @@ def test_components_keyed_strategy_long_short(decomposer):
     assert set(decomposer.components.keys()) == {"strategy", "long", "short"}
     assert all(isinstance(v, Tearsheet) for v in decomposer.components.values())
 
+def test_build_bench_columns_align_with_portfolio_stats(decomposer):
+    # regression guard: build()'s equity/trades now go through resample("D") rather than
+    # groupby(df.index.date). If its output index ever drifted from portfolio.stats' date-object
+    # index (e.g. left as Timestamps instead of relabelled back to `date`), append_bench's axis=1
+    # concat would silently fail to align, leaving bench_ret/bench_dd all-NaN for every row -
+    # correlation would come out NaN rather than raising, so assert on it explicitly here.
+    for leg in ["long", "short"]:
+        assert np.isfinite(decomposer.components[leg].relative.correlation)
+
 def test_date_range_slicing_matches_requested_window(portfolio_factory):
     portfolio = portfolio_factory(n_days=20)
     full_days = portfolio.stats.shape[0]

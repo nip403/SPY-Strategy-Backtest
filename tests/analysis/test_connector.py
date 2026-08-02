@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 from contextlib import redirect_stdout
+from datetime import date
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -56,6 +57,20 @@ def test_short_only_combined_growth_matches_book_plus_additive_short(portfolio_f
 
     approx_expected = book_growth + w * (short_growth - 1)
     assert combined_growth == pytest.approx(approx_expected, rel=0.05)
+
+def test_daily_matches_hand_derived_compounded_returns_across_weekend_gap(connector):
+    # pins self.daily's resample("D") rewrite against the original groupby(df.index.date) formula
+    # (connector fixture uses n_days=25, which spans weekend gaps)
+    expected = (1 + connector.df).groupby(connector.df.index.date).prod() - 1
+    pd.testing.assert_frame_equal(connector.daily[["strat", "book", "bench"]], expected, check_names=False)
+
+def test_daily_index_is_date_objects_with_no_extra_weekend_rows(connector):
+    # regression guard: resample("D") bins every calendar day incl. weekends with no data - self.daily
+    # must filter those back out and relabel to plain `date` objects (_exact_leg_returns.to_daily's
+    # .loc[self.daily.index] depends on this exact index contract to line up correctly)
+    expected_days = sorted(set(connector.df.index.date))
+    assert list(connector.daily.index) == expected_days
+    assert all(type(d) is date for d in connector.daily.index)
 
 def test_daily_has_no_long_short_columns(connector):
     # long/short legs are internal-only calc intermediates (self._daily_long/_daily_short),

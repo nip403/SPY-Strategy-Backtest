@@ -58,6 +58,40 @@ def test_preprocess_bounds_ordering(portfolio_factory):
     assert (valid["upper_bound"] >= valid["lower_bound"]).all()
     assert (valid["long_stop"] >= valid["short_stop"]).all()
 
+# ---- _preprocess / _aggregate: resample("D")/.floor("D") rewrite vs. the original groupby(date) formula ----
+# n_days=25 (> 1 trading week) guarantees these span weekend gaps, which is exactly the case where
+# a naive resample would diverge from groupby(df.index.date) (see core.py's _preprocess/_aggregate)
+
+def test_preprocess_prev_close_and_std_match_hand_derived_groupby(portfolio_factory, synthetic_ohlcv, random_seed):
+    raw = synthetic_ohlcv(n_days=25)
+    p = portfolio_factory(n_days=25)
+
+    old_closes = raw.groupby(raw.index.date)["close"].last()
+    expected_prev_close = pd.Series(raw.index.date, index=raw.index).map(old_closes.shift(1))
+    expected_std = pd.Series(raw.index.date, index=raw.index).map(old_closes.pct_change().rolling(window=14).std().shift(1))
+
+    pd.testing.assert_series_equal(p.df["prev_close"], expected_prev_close.loc[p.df.index], check_names=False)
+    pd.testing.assert_series_equal(p.df["std"], expected_std.loc[p.df.index].astype(float), check_names=False)
+
+def test_preprocess_vwap_matches_hand_derived_groupby(portfolio_factory, synthetic_ohlcv, random_seed):
+    raw = synthetic_ohlcv(n_days=25)
+    p = portfolio_factory(n_days=25)
+
+    pv = raw["volume"] * (raw["high"] + raw["low"] + raw["close"]) / 3
+    expected_vwap = pv.groupby(raw.index.date).cumsum() / raw["volume"].groupby(raw.index.date).cumsum()
+
+    pd.testing.assert_series_equal(p.df["vwap"], expected_vwap.loc[p.df.index], check_names=False)
+
+def test_aggregate_index_has_no_extra_weekend_rows_and_stays_date_typed(portfolio_factory):
+    # regression guard: resample("D") bins every calendar day including weekends with no data -
+    # _aggregate must filter those back out and relabel to plain `date` objects (self.t0/t1 and
+    # every .loc[date...] slice elsewhere depend on this exact index contract)
+    p = portfolio_factory(n_days=25)
+
+    expected_days = sorted(set(p.df.index.date))
+    assert list(p.stats.index) == expected_days
+    assert all(type(d) is type(p.t0) for d in p.stats.index)
+
 # ---- _backtest -----------------------------------------------------------
 
 def test_backtest_drops_warmup_nan_rows(portfolio_factory):

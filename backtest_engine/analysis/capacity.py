@@ -74,7 +74,7 @@ class CapacityEstimator(AnalysisReport):
         # precomputation for efficiency
         base_sub = df[["close", "volume", "ret"]].copy()
         pos, runs = position.to_numpy(), runs.to_numpy()
-        dates = df.index.date
+        dates = df.index.floor("D")
         eod_indices = np.append(np.flatnonzero(dates[:-1] != dates[1:]), len(dates) - 1)
         delayed_pos = np.where(runs[:, None] >= self.delays[None, :], pos[:, None], 0)
 

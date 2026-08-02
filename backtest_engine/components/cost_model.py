@@ -135,11 +135,16 @@ class DynamicCostModel(CostComponent):
             df with "net_ret" added: returns after market impact and commission costs.
         """
 
-        dates = pd.Series(df.index.date, index=df.index)
-        buckets = df.groupby(df.index.date)
+        # resample bins every day in the span, restrict to days actually present before rolling
+        day_key = df.index.floor("D")
+        valid_days = day_key.unique()
 
-        adv = dates.map(buckets["volume"].sum().rolling(self.lookback_window).mean().shift(1)).fillna(0)
-        ann_vol = dates.map(buckets["close"].last().pct_change().rolling(self.lookback_window).std().shift(1) * np.sqrt(252)).fillna(0)
+        adv = df["volume"].resample("D").sum().loc[valid_days].rolling(self.lookback_window).mean().shift(1)
+        close = df["close"].resample("D").last().loc[valid_days]
+        ann_vol = close.pct_change().rolling(self.lookback_window).std().shift(1) * np.sqrt(252)
+
+        adv = pd.Series(day_key.map(adv), index=df.index).fillna(0)
+        ann_vol = pd.Series(day_key.map(ann_vol), index=df.index).fillna(0)
 
         cache.setdefault("close", df["close"])
         cache.setdefault("volume", df["volume"])

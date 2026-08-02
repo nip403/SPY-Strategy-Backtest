@@ -39,15 +39,19 @@ class PortfolioDecomposer(AnalysisReport):
         net_ret = {leg: pd.Series(legs[leg]["net_ret"][:, 0], index=df.index) for leg in ["long", "short"]}
 
         # prepare tearsheets for each component
+        valid_days = df.index.floor("D").unique() # resample("D") bins every calendar day incl. weekends; restrict to days actually present
+
         def build(ret: pd.Series, pos: pd.Series) -> pd.DataFrame:
-            equity = (1 + ret).cumprod().groupby(df.index.date).last()
+            equity = (1 + ret).cumprod().resample("D").last().loc[valid_days]
+            equity.index = equity.index.date
 
             daily_ret = equity.pct_change().fillna(0)
             daily_ret.iloc[0] = equity.iloc[0] - 1
 
             dd = compute_drawdown(equity)
 
-            trades = trade_stats(pos, ret)[["trade_count", "trade_wins"]].groupby(df.index.date).sum().astype(int)
+            trades = trade_stats(pos, ret)[["trade_count", "trade_wins"]].resample("D").sum().loc[valid_days].astype(int)
+            trades.index = trades.index.date
 
             return pd.DataFrame({
                 "strat_ret": daily_ret,
