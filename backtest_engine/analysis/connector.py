@@ -4,6 +4,7 @@ import dataclasses
 from pathlib import Path
 from typing import Optional, Any
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 import pandas as pd
 import numpy as np
 import warnings
@@ -18,7 +19,7 @@ class StrategyConnector(AnalysisReport):
     DEFAULT_PARAMS = {
         "rebalance_period": 21,
         "lookback_window": 21,
-        "sweep_intervals": 0.01,
+        "weight_intervals": 0.01,
     }
     
     def __init__(self, strategy_portfolio: Portfolio, book_equity: pd.Series, benchmark_equity: pd.Series, config: Optional[dict[str, Any]] = None) -> None:
@@ -56,7 +57,7 @@ class StrategyConnector(AnalysisReport):
         
         # for self._tradeoff_profile, consider adding switches (just override after init in current implementation)
         self.lookback_window = config["lookback_window"]
-        self.sweep_intervals = config["sweep_intervals"]
+        self.weight_intervals = config["weight_intervals"]
 
         self.portfolio = strategy_portfolio
         self.book = book_equity
@@ -90,7 +91,7 @@ class StrategyConnector(AnalysisReport):
         # create bundled portfolios - assumes regular rebalancing to given weight every self.rebalance_period days
         # NOTE: weights are BACKWARDS looking, set to base off book/strategy starting equity
         self._naive_w = 0.5
-        naive_long, naive_short = self._exact_block_leg_returns(self._naive_w)
+        naive_long, naive_short = self._exact_block_leg_returns(np.array([self._naive_w]))
         self.daily["combined"] = self._mix_returns(np.array([self._naive_w]), naive_long, naive_short)[:, 0] # naive mix: target weight = initial starting capital proportions
 
         self._opt_w, self.daily["optimised"] = self._optimise_weight()
@@ -157,7 +158,7 @@ class StrategyConnector(AnalysisReport):
             lo = max(0, best_weight - span)
             hi = min(1, best_weight + span)
 
-        final_long, final_short = self._exact_block_leg_returns(best_weight)
+        final_long, final_short = self._exact_block_leg_returns(np.array([best_weight]))
         final_mixed = self._mix_returns(np.array([best_weight]), final_long, final_short)[:, 0]
 
         return best_weight, pd.Series(final_mixed, index=self.daily.index)
@@ -218,7 +219,7 @@ class StrategyConnector(AnalysisReport):
 
         return r
 
-    def _exact_leg_returns(self, aums: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def _exact_leg_returns(self, aums: np.ndarray) -> tuple[np.ndarray]:
         """
         Calculates capacity-aware daily long/short leg returns at each AUM.
 
@@ -236,37 +237,43 @@ class StrategyConnector(AnalysisReport):
 
         def to_daily(net_ret_matrix: np.ndarray) -> np.ndarray:
             daily = pd.DataFrame(1 + net_ret_matrix, index=self.portfolio.df.index).resample("D").prod() - 1
-            daily.index = daily.index.date # match self.daily's date-object index so .loc below aligns correctly
+            daily.index = daily.index.date
 
             return daily.loc[self.daily.index].values
 
         return to_daily(legs["long"]["net_ret"]), to_daily(legs["short"]["net_ret"])
 
-    def _exact_block_leg_returns(self, weight: float) -> tuple[np.ndarray, np.ndarray]:
+    def _exact_block_leg_returns(self, weights: np.ndarray) -> tuple[np.ndarray]:
         """
-        Calculates the exact cost-adjusted daily long/short leg returns for a rebalanced
-        strategy integration. Recomputes leg returns using exact AUM at each rebalance, scaling
-        strategy capital with true mixed portfolio growth to maintain the target weight.
+        Calculates the exact cost-adjusted daily long/short returns for rebalanced mix for all target weights.
+        Recomputes leg returns using exact AUM at each rebalance, scaling strategy capital with mixed portfolio growth to maintain target weight.
 
-        weight : float
-            Target strategy allocation.
+        weights : np.ndarray
+            Target strategy allocations to evaluate.
 
         Returns tuple[np.ndarray, np.ndarray]
-            (long_daily, short_daily), each of shape (n_days, 1).
+            (long_daily, short_daily), each of shape (n_days, len(weights)).
         """
 
-        approx_mixed = self._mix_returns(np.array([weight]), self._daily_long.values[:, None], self._daily_short.values[:, None])[:, 0]
+        k = len(weights)
+        approx_mixed = self._mix_returns(
+            weights,
+            np.tile(self._daily_long.values[:, None], (1, k)),
+            np.tile(self._daily_short.values[:, None], (1, k)),
+        )
 
-        # portfolio & book growth at the start of each rebalance period
-        port_growth = pd.Series(approx_mixed).add(1).cumprod().shift(1).fillna(1).values
-        block_growth = port_growth[np.arange(0, len(self.daily), self.rebalance_period)]
+        # portfolio & book growth at the start of each rebalance period, per weight scenario
+        port_growth = np.vstack([np.ones((1, k)), np.cumprod(1 + approx_mixed, axis=0)[:-1, :]])
+        block_starts = np.arange(0, len(self.daily), self.rebalance_period)
+        block_growth = port_growth[block_starts, :] # shape (n_blocks, k)
         block_idx = np.arange(len(self.daily)) // self.rebalance_period
 
-        exact_aums = weight * self.initial_book_cap * block_growth
+        exact_aums = (weights[None, :] * self.initial_book_cap * block_growth).ravel() # (block, weight) pairs, flattened for one batched capacity-cost call
 
         long_daily, short_daily = self._exact_leg_returns(exact_aums)
 
-        pick = lambda m: m.reshape(len(self.daily), len(block_growth), 1)[np.arange(len(self.daily)), block_idx]
+        n_blocks = len(block_starts)
+        pick = lambda m: m.reshape(len(self.daily), n_blocks, k)[np.arange(len(self.daily)), block_idx, :]
 
         return pick(long_daily), pick(short_daily)
     
@@ -275,33 +282,82 @@ class StrategyConnector(AnalysisReport):
         Return tradeoff statistics balancing different weights of strategy to book to plot.
         Stats describe the entire strategy + book mix across weight intervals.
         No setting for long/short only - ensure Portfolio has correct l/s permissions before connecting.
-        
+
         Calm-period cost filters out market crashes simplistically using a centred window returning the bottom 10% of returns.
         This approach has many issues but is eyeballed to be the best indicator using utils.crash_period_estimators.
-    
+
         Returns pd.DataFrame
-            Columns (sharpe, drag, maxdd, dd_days, recovery, es)
-             = Sharpe, Drag (calm-period cost), Max Drawdown, Max DD. Days, Exp. Shortfall, DD. Recovery Days, Expected Shortfall.  
-        
-        
-        steps:
-        Have init call and save the tradeoff profile, 
-        and print a separate table with the tradeoff stats in str. 
-        Generate more figures in plot: one for sharpe/drag/es, and one for maxdd, days, and recovery.
+            Columns (sharpe, drag, maxdd, dd_days, recovery)
+             = Sharpe, Drag (calm-period cost), Max Drawdown, Max DD Days, DD Recovery Days.
         """
-        
-        bench = self.benchmark.resample("D").last().dropna()
+
+        # crash detection
+        bench = self.bench.resample("D").last().dropna()
         half_window = self.lookback_window // 2
         centred_ret = bench.shift(-half_window) / bench.shift(half_window) - 1 # net move over a centred window, not just dispersion
+        
         crash = centred_ret < centred_ret.quantile(0.10)
+        crash.index = crash.index.date # strip tz-aware stamps + dt
+        crash = crash.reindex(self.daily.index, fill_value=False).to_numpy()
+
+        weights = np.linspace(0, 1, round(1 / self.weight_intervals) + 1)
+
+        # block-rebalanced mix adjusted for dynamic capacity costs - NOTE: assumes book has linear costing
+        long_daily, short_daily = self._exact_block_leg_returns(weights)
+        returns_matrix = self._mix_returns(weights, long_daily, short_daily)
+
+        equity = np.cumprod(1 + returns_matrix, axis=0)
+        peak = np.maximum.accumulate(equity, axis=0)
+        drawdown = (equity - peak) / peak
+
+        std = np.nanstd(returns_matrix, axis=0)
+        sharpe = np.where(std != 0, (np.nanmean(returns_matrix, axis=0) / std) * np.sqrt(252), 0)
         
-        scenarios = np.linspace(0, 1, 1 / self.sweep_intervals)
-        #returns_matrix = self._mix_returns(scenarios, self._daily_long, self._daily_short)
-        
-        
-        #out = pd.DataFrame([], columns=scenarios)
-        
-        return #pd.DataFrame(masks)
+        maxdd = drawdown.min(axis=0)
+
+        underwater = (drawdown < 0).astype(int)
+        running = np.cumsum(underwater, axis=0)
+        reset_base = np.maximum.accumulate(np.where(underwater == 0, running, 0), axis=0)
+        dd_days = (running - reset_base).max(axis=0)
+
+        n_days = returns_matrix.shape[0]
+        rows = np.arange(n_days)[:, None]
+        trough_idx = np.argmin(drawdown, axis=0)
+        recovered = np.where((rows >= trough_idx[None, :]) & np.isclose(drawdown, 0), rows, n_days)
+        recovery = recovered.min(axis=0) - trough_idx
+
+        # calm-period drag: annualised return given up vs. holding the book alone on non-crash days only
+        drag = (self.daily["book"].to_numpy()[~crash].mean() - returns_matrix[~crash, :].mean(axis=0)) * 252
+
+        return pd.DataFrame({
+            "sharpe": sharpe,
+            "drag": drag,
+            "maxdd": maxdd,
+            "dd_days": dd_days.astype(int),
+            "recovery": recovery.astype(int),
+        }, index=weights)
+
+    def _format_tradeoff_table(self) -> str:
+        """
+        Format self.tradeoff_series as a standalone table, decimated to 10% weight increments for
+        readability (self.tradeoff_series itself keeps the full self.weight_intervals resolution for plotting).
+        """
+
+        step = max(1, round(0.10 / self.weight_intervals))
+        sample = self.tradeoff_series.iloc[::step]
+
+        columns = {
+            "Sharpe": [format_value(v) for v in sample["sharpe"]],
+            "Drag (Calm-Period Cost)": [format_value(v, pct=True) for v in sample["drag"]],
+            "Max Drawdown": [format_value(v, pct=True) for v in sample["maxdd"]],
+            "Max DD Days": [format_value(v, suffix=" Days") for v in sample["dd_days"]],
+            "DD Recovery Days": [format_value(v, suffix=" Days") for v in sample["recovery"]],
+            "Expected Shortfall": [format_value(v, pct=True) for v in sample["es"]],
+        }
+
+        index = pd.Index([f"{w:.0%}" for w in sample.index], name="Strategy Weight")
+
+        return pd.DataFrame(columns, index=index).to_string()
 
     def _generate_report(self) -> None:
         """
@@ -424,10 +480,75 @@ class StrategyConnector(AnalysisReport):
         plt.tight_layout()
         plt.show()
 
+        def mark_weights(ax: plt.Axes) -> None:
+            ax.axvline(self._naive_w, color="gray", linestyle="--", linewidth=1, label="Combined Weight")
+            ax.axvline(self._opt_w, color="red", linestyle=":", linewidth=1, label="Optimised Weight")
+
+        # tradeoff: sharpe / drag / expected shortfall vs. strategy weight
+        fig2, axes2 = plt.subplots(nrows=3, ncols=1, figsize=(14, 9), sharex=True)
+
+        axes2[0].plot(self.tradeoff_series.index, self.tradeoff_series["sharpe"], linewidth=1)
+        axes2[0].set_title("Sharpe vs. Strategy Weight", loc="left", fontweight="bold")
+        axes2[0].set_ylabel("Sharpe Ratio")
+
+        axes2[1].plot(self.tradeoff_series.index, self.tradeoff_series["drag"], linewidth=1, color="firebrick")
+        axes2[1].axhline(0, color="black", linewidth=1, alpha=0.5)
+        axes2[1].set_title("Calm-Period Drag vs. Strategy Weight", loc="left", fontweight="bold")
+        axes2[1].set_ylabel("Ann. Drag")
+
+        axes2[2].plot(self.tradeoff_series.index, self.tradeoff_series["es"], linewidth=1, color="darkorange")
+        axes2[2].axhline(0, color="black", linewidth=1, alpha=0.5)
+        axes2[2].set_title("Crash-Period Expected Shortfall vs. Strategy Weight", loc="left", fontweight="bold")
+        axes2[2].set_ylabel("Expected Shortfall")
+
+        for ax in axes2:
+            mark_weights(ax)
+            ax.label_outer()
+            ax.margins(x=0)
+            ax.xaxis.set_major_formatter(ticker.PercentFormatter(xmax=1))
+
+        axes2[0].legend(loc="upper right", fontsize=9)
+        axes2[-1].set_xlabel("Strategy Weight", fontweight="bold")
+        plt.tight_layout()
+        plt.show()
+
+        # tradeoff: max drawdown / dd days / recovery days vs. strategy weight
+        fig3, axes3 = plt.subplots(nrows=3, ncols=1, figsize=(14, 9), sharex=True)
+
+        axes3[0].plot(self.tradeoff_series.index, self.tradeoff_series["maxdd"], linewidth=1)
+        axes3[0].axhline(0, color="black", linewidth=1, alpha=0.5)
+        axes3[0].set_title("Max Drawdown vs. Strategy Weight", loc="left", fontweight="bold")
+        axes3[0].set_ylabel("Max Drawdown")
+
+        axes3[1].plot(self.tradeoff_series.index, self.tradeoff_series["dd_days"], linewidth=1, color="firebrick")
+        axes3[1].set_title("Max Drawdown Days vs. Strategy Weight", loc="left", fontweight="bold")
+        axes3[1].set_ylabel("Days")
+
+        axes3[2].plot(self.tradeoff_series.index, self.tradeoff_series["recovery"], linewidth=1, color="darkorange")
+        axes3[2].set_title("Drawdown Recovery Days vs. Strategy Weight", loc="left", fontweight="bold")
+        axes3[2].set_ylabel("Days")
+
+        for ax in axes3:
+            mark_weights(ax)
+            ax.label_outer()
+            ax.margins(x=0)
+            ax.xaxis.set_major_formatter(ticker.PercentFormatter(xmax=1))
+
+        axes3[0].legend(loc="upper right", fontsize=9)
+        axes3[-1].set_xlabel("Strategy Weight", fontweight="bold")
+        plt.tight_layout()
+        plt.show()
+
         if savepath is not None:
-            save_figures({"integration_overview": fig}, type(self).__name__, savepath)
+            save_figures({
+                "integration_overview": fig,
+                "tradeoff_sharpe_drag_es": fig2,
+                "tradeoff_drawdown_profile": fig3,
+            }, type(self).__name__, savepath)
 
         plt.close(fig)
+        plt.close(fig2)
+        plt.close(fig3)
 
     def __str__(self) -> str:
         """
@@ -481,5 +602,7 @@ class StrategyConnector(AnalysisReport):
             other_rows.append((label, values))
 
         all_groups = main_groups + [("Incremental (vs Book)", incremental_rows), ("Other", other_rows)]
-        
-        return render_sections(headers, all_groups)
+
+        tradeoff_table = self._format_tradeoff_table()
+
+        return render_sections(headers, all_groups) + "\n\n> Strategy/Book Weight Tradeoff Profile\n" + tradeoff_table

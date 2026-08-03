@@ -88,7 +88,7 @@ def test_strategy_connector_full_pipeline_smoke(synthetic_ohlcv, random_seed, ca
     figs_before = len(plt.get_fignums())
     sc.report()
 
-    assert len(captured_figures) == 1
+    assert len(captured_figures) == 3
     assert len(plt.get_fignums()) == figs_before
     assert isinstance(str(sc), str)
 

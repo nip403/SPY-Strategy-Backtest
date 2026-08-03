@@ -177,26 +177,96 @@ def test_cvar_monte_carlo_seeded_reproducible_across_runs(portfolio_factory, ran
 
     assert sc1.extras.cvar_monte_carlo == sc2.extras.cvar_monte_carlo
 
+# ---- _tradeoff_profile / _format_tradeoff_table --------------------------
+
+def test_tradeoff_profile_columns_and_index_bounds(connector):
+    tp = connector.tradeoff_series
+
+    assert list(tp.columns) == ["sharpe", "drag", "maxdd", "dd_days", "recovery", "es"]
+    assert tp.index[0] == pytest.approx(0.0)
+    assert tp.index[-1] == pytest.approx(1.0)
+    assert len(tp) == round(1 / connector.weight_intervals) + 1
+
+def test_tradeoff_profile_respects_custom_weight_intervals(portfolio_factory, random_seed):
+    portfolio = portfolio_factory(n_days=25)
+    book, _ = generate_toy_equity(portfolio=portfolio, sharpe=1.0, volatility=0.15, beta=0.5, benchmark=portfolio.df["close"], random_seed=random_seed)
+    sc = StrategyConnector(portfolio, book, portfolio.df["close"], config={"weight_intervals": 0.25})
+
+    np.testing.assert_allclose(sc.tradeoff_series.index.to_numpy(), [0.0, 0.25, 0.5, 0.75, 1.0])
+
+def test_exact_block_leg_returns_batched_matches_individual_calls(connector):
+    # _tradeoff_profile batches every weight scenario into one _exact_block_leg_returns(weights) call
+    # (one flattened (block, weight) capacity-cost lookup rather than looping weight-by-weight) - this
+    # pins that the reshape/pick indexing recovers each weight's own column correctly under batching
+    weights = np.array([0.2, 0.5, 0.9])
+    batched_long, batched_short = connector._exact_block_leg_returns(weights)
+
+    for i, w in enumerate(weights):
+        single_long, single_short = connector._exact_block_leg_returns(np.array([w]))
+        np.testing.assert_allclose(batched_long[:, i], single_long[:, 0])
+        np.testing.assert_allclose(batched_short[:, i], single_short[:, 0])
+
+def test_tradeoff_profile_weight_zero_exactly_matches_book(connector):
+    # weight=0 zeroes out both legs' contribution inside _mix_returns regardless of what leg
+    # returns were fed in, so this must match the book's own stats exactly, not just approximately
+    book = connector.daily["book"].to_numpy()
+
+    equity = np.cumprod(1 + book)
+    peak = np.maximum.accumulate(equity)
+    expected_maxdd = ((equity - peak) / peak).min()
+
+    row0 = connector.tradeoff_series.iloc[0]
+    assert row0["sharpe"] == pytest.approx(book.mean() / book.std() * np.sqrt(252))
+    assert row0["maxdd"] == pytest.approx(expected_maxdd)
+
+def test_tradeoff_profile_drawdown_stats_have_expected_sign(connector):
+    tp = connector.tradeoff_series
+
+    assert (tp["maxdd"] <= 0).all()
+    assert (tp["dd_days"] >= 0).all()
+    assert (tp["recovery"] >= 0).all()
+
+def test_tradeoff_profile_crash_columns_populated_with_enough_history(portfolio_factory, random_seed):
+    # connector's default n_days=25 fixture is too short for the centred lookback window to
+    # reliably flag any crash day - use a longer backtest so es/drag are actually exercised
+    portfolio = portfolio_factory(n_days=80)
+    book, _ = generate_toy_equity(portfolio=portfolio, sharpe=1.0, volatility=0.15, beta=0.5, benchmark=portfolio.df["close"], random_seed=random_seed)
+    sc = StrategyConnector(portfolio, book, portfolio.df["close"])
+
+    assert sc.tradeoff_series["es"].notna().any()
+    assert sc.tradeoff_series["drag"].notna().all()
+
+def test_format_tradeoff_table_decimates_to_ten_percent_steps(connector):
+    text = connector._format_tradeoff_table()
+
+    for pct in ["0%", "10%", "50%", "100%"]:
+        assert pct in text
+
+    assert "Drag (Calm-Period Cost)" in text
+    assert "Expected Shortfall" in text
+
 # ---- plot / str / report ------------------------------------------------
 
 def test_plot_shows_and_closes_figure(connector, captured_figures):
     figs_before = len(plt.get_fignums())
     connector.plot()
 
-    assert len(captured_figures) == 1
+    assert len(captured_figures) == 3
     assert len(plt.get_fignums()) == figs_before
 
 def test_plot_savepath_saves_and_closes_figure(connector, captured_figures, tmp_path):
     figs_before = len(plt.get_fignums())
     connector.plot(savepath=tmp_path)
 
-    assert len(captured_figures) == 1
+    assert len(captured_figures) == 3
     assert len(plt.get_fignums()) == figs_before
 
     created = list(tmp_path.iterdir())
     assert len(created) == 1
     assert created[0].name.startswith("StrategyConnector_")
-    assert (created[0] / "integration_overview.png").exists()
+
+    saved = {p.name for p in created[0].iterdir()}
+    assert saved == {"integration_overview.png", "tradeoff_sharpe_drag_es.png", "tradeoff_drawdown_profile.png"}
 
 def test_str_contains_all_five_columns(connector):
     text = str(connector)
@@ -218,6 +288,7 @@ def test_report_plots_and_prints(connector, captured_figures):
     with redirect_stdout(buf):
         connector.report()
 
-    assert len(captured_figures) == 1
+    assert len(captured_figures) == 3
     assert len(plt.get_fignums()) == figs_before
     assert "Sharpe Ratio" in buf.getvalue()
+    assert "Strategy/Book Weight Tradeoff Profile" in buf.getvalue()
