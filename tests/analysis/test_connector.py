@@ -185,19 +185,35 @@ def test_tradeoff_profile_columns_and_index_bounds(connector):
     assert list(tp.columns) == ["sharpe", "drag", "maxdd", "dd_days", "recovery", "cvar", "dd_relief_per_drag", "cvar_relief_per_drag"]
     assert tp.index[0] == pytest.approx(0.0)
     assert tp.index[-1] == pytest.approx(1.0)
-    assert len(tp) == round(1 / connector.weight_intervals) + 1
+    # >=, not ==: the sweep also unions in the 10% guarantee points _format_tradeoff_table relies on
+    assert len(tp) >= round(1 / connector.weight_intervals) + 1
 
 def test_tradeoff_profile_respects_custom_weight_intervals(portfolio_factory, random_seed):
     portfolio = portfolio_factory(n_days=25)
     book, _ = generate_toy_equity(portfolio=portfolio, sharpe=1.0, volatility=0.15, beta=0.5, benchmark=portfolio.df["close"], random_seed=random_seed)
     sc = StrategyConnector(portfolio, book, portfolio.df["close"], config={"weight_intervals": 0.25})
 
-    np.testing.assert_allclose(sc.tradeoff_series.index.to_numpy(), [0.0, 0.25, 0.5, 0.75, 1.0])
+    index = sc.tradeoff_series.index.to_numpy()
+    for w in [0.0, 0.25, 0.5, 0.75, 1.0]:
+        assert np.any(np.isclose(index, w))
+
+def test_format_tradeoff_table_works_with_coarse_weight_intervals(portfolio_factory, random_seed):
+    # _format_tradeoff_table does an exact .loc[] lookup on the 10%-step points - _tradeoff_profile
+    # must guarantee those exact points exist even when weight_intervals doesn't evenly divide 0.1
+    portfolio = portfolio_factory(n_days=25)
+    book, _ = generate_toy_equity(portfolio=portfolio, sharpe=1.0, volatility=0.15, beta=0.5, benchmark=portfolio.df["close"], random_seed=random_seed)
+    sc = StrategyConnector(portfolio, book, portfolio.df["close"], config={"weight_intervals": 0.3})
+
+    text = sc._format_tradeoff_table()
+
+    for pct in ["0%", "10%", "50%", "100%"]:
+        assert pct in text
 
 def test_exact_block_leg_returns_batched_matches_individual_calls(connector):
-    # _tradeoff_profile batches every weight scenario into one _exact_block_leg_returns(weights) call
-    # (one flattened (block, weight) capacity-cost lookup rather than looping weight-by-weight) - this
-    # pins that the reshape/pick indexing recovers each weight's own column correctly under batching
+    # _exact_block_leg_returns batches every weight scenario into one flattened (block, weight)
+    # capacity-cost lookup rather than looping weight-by-weight (kept general even though current
+    # callers only ever pass a single final weight) - this pins that the reshape/pick indexing
+    # recovers each weight's own column correctly under batching
     weights = np.array([0.2, 0.5, 0.9])
     batched_long, batched_short = connector._exact_block_leg_returns(weights)
 
@@ -255,7 +271,7 @@ def test_tradeoff_profile_cvar_is_mean_of_own_worst_five_percent(connector):
     tp = connector.tradeoff_series
     weights = tp.index.to_numpy()
 
-    long_daily, short_daily = connector._exact_block_leg_returns(weights)
+    long_daily, short_daily = connector._approx_aum_leg_returns(weights)
     returns_matrix = connector._mix_returns(weights, long_daily, short_daily)
     var_95 = np.quantile(returns_matrix, 0.05, axis=0)
 
