@@ -4,7 +4,7 @@ import dataclasses
 from pathlib import Path
 from typing import Optional, Any
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
+from matplotlib.ticker import PercentFormatter, MultipleLocator
 import pandas as pd
 import numpy as np
 import warnings
@@ -33,6 +33,7 @@ class StrategyConnector(AnalysisReport):
             If the provided strategy is short-only, optimal weight is determined by varying short-leg notional from 0-100% of book value.
 
         Only evaluates the period intersected by strategy-book-benchmark indices.
+        Across all strategy-book mixing (e.g. rebalancing, _tradeoff_profile, optimising weight, etc.), models book with simple linear costing.
 
         strategy_portfolio : Portfolio
             Strategy portfolio to integrate into the existing book.
@@ -129,23 +130,7 @@ class StrategyConnector(AnalysisReport):
         for _ in range(depth):
             weights = np.linspace(lo, hi, points)
 
-            approx_mixed = self._mix_returns(
-                weights,
-                np.tile(self._daily_long.values[:, None], (1, points)),
-                np.tile(self._daily_short.values[:, None], (1, points)),
-            )
-
-            # average portfolio growth factor
-            port_growth = np.cumprod(1 + approx_mixed, axis=0)
-            port_growth = np.vstack([np.ones((1, points)), port_growth[:-1, :]]) # use capital on previous day to rebalance
-
-            block_growth = port_growth[np.arange(0, len(self.daily), self.rebalance_period), :]
-            mean_growth = block_growth.mean(axis=0)
-
-            # scale by mean mixed growth per weight
-            aums = weights * self.initial_book_cap * mean_growth
-
-            long_daily, short_daily = self._exact_leg_returns(aums)
+            long_daily, short_daily = self._approx_aum_leg_returns(weights)
             mixed = self._mix_returns(weights, long_daily, short_daily)
 
             std = np.nanstd(mixed, axis=0)
@@ -254,16 +239,15 @@ class StrategyConnector(AnalysisReport):
         Returns tuple[np.ndarray, np.ndarray]
             (long_daily, short_daily), each of shape (n_days, len(weights)).
         """
-
-        k = len(weights)
+        
         approx_mixed = self._mix_returns(
             weights,
-            np.tile(self._daily_long.values[:, None], (1, k)),
-            np.tile(self._daily_short.values[:, None], (1, k)),
+            np.tile(self._daily_long.values[:, None], (1, len(weights))),
+            np.tile(self._daily_short.values[:, None], (1, len(weights))),
         )
 
         # portfolio & book growth at the start of each rebalance period, per weight scenario
-        port_growth = np.vstack([np.ones((1, k)), np.cumprod(1 + approx_mixed, axis=0)[:-1, :]])
+        port_growth = np.vstack([np.ones((1, len(weights))), np.cumprod(1 + approx_mixed, axis=0)[:-1, :]])
         block_starts = np.arange(0, len(self.daily), self.rebalance_period)
         block_growth = port_growth[block_starts, :] # shape (n_blocks, k)
         block_idx = np.arange(len(self.daily)) // self.rebalance_period
@@ -273,10 +257,42 @@ class StrategyConnector(AnalysisReport):
         long_daily, short_daily = self._exact_leg_returns(exact_aums)
 
         n_blocks = len(block_starts)
-        pick = lambda m: m.reshape(len(self.daily), n_blocks, k)[np.arange(len(self.daily)), block_idx, :]
+        pick = lambda m: m.reshape(len(self.daily), n_blocks, len(weights))[np.arange(len(self.daily)), block_idx, :]
 
         return pick(long_daily), pick(short_daily)
-    
+
+    def _approx_aum_leg_returns(self, weights: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Approximates capacity-aware daily long/short leg returns per weight using a single AUM per weight.
+        Avoids blowing up memory by recomputing exact AUM at every block boundary like in self._exact_block_leg_returns.
+
+        Scales at O(len(weights)) from O(n_blocks x len(weights)).
+
+        weights : np.ndarray
+            Target strategy allocations to evaluate, one per scenario.
+
+        Returns tuple[np.ndarray, np.ndarray]
+            (long_daily, short_daily), each of shape (n_days, len(weights)).
+        """
+
+        approx_mixed = self._mix_returns(
+            weights,
+            np.tile(self._daily_long.values[:, None], (1, len(weights))),
+            np.tile(self._daily_short.values[:, None], (1, len(weights))),
+        )
+
+        # average portfolio growth factor
+        port_growth = np.cumprod(1 + approx_mixed, axis=0)
+        port_growth = np.vstack([np.ones((1, len(weights))), port_growth[:-1, :]]) # use capital on previous day to rebalance
+
+        block_growth = port_growth[np.arange(0, len(self.daily), self.rebalance_period), :]
+        mean_growth = block_growth.mean(axis=0)
+
+        # scale by mean mixed growth per weight
+        aums = weights * self.initial_book_cap * mean_growth
+
+        return self._exact_leg_returns(aums)
+
     def _tradeoff_profile(self) -> pd.DataFrame:
         """
         Return tradeoff statistics balancing different weights of strategy to book to plot.
@@ -288,7 +304,7 @@ class StrategyConnector(AnalysisReport):
 
         Returns pd.DataFrame
             Columns (sharpe, drag, maxdd, dd_days, recovery, cvar, dd_relief_per_drag, cvar_relief_per_drag)
-             = Sharpe, Drag (calm-period cost), Max Drawdown, Max DD Days, DD Recovery Days, 95% CVaR, (Max DD relief vs. book) / Drag, (CVaR relief vs. book) / Drag.
+             = Sharpe, Drag (calm-period cost), Max Drawdown, Max DD Days, DD Recovery Days, 95% CVaR, (Max DD change vs. book) / Drag, (CVaR change vs. book) / Drag.
         """
 
         # crash detection
@@ -306,8 +322,7 @@ class StrategyConnector(AnalysisReport):
             np.linspace(0, 1, 11),
         ])
 
-        # block-rebalanced mix adjusted for dynamic capacity costs - NOTE: assumes book has linear costing
-        long_daily, short_daily = self._exact_block_leg_returns(weights)
+        long_daily, short_daily = self._approx_aum_leg_returns(weights)
         returns_matrix = self._mix_returns(weights, long_daily, short_daily)
 
         equity = np.cumprod(1 + returns_matrix, axis=0)
@@ -363,20 +378,20 @@ class StrategyConnector(AnalysisReport):
         sample = self.tradeoff_series.loc[np.linspace(0, 1, 11)]
         fmt_vals = lambda arr, **kwargs: [format_value(i, **kwargs) for i in arr]
         
-        columns = {
+        rows = {
             "Sharpe": fmt_vals(sample["sharpe"]),
             "Drag (Calm-Period Cost)": fmt_vals(sample["drag"], pct=True),
             "Max Drawdown": fmt_vals(sample["maxdd"], pct=True),
             "Max DD Days": fmt_vals(sample["dd_days"], suffix=" Days"),
             "DD Recovery Days": fmt_vals(sample["recovery"], suffix=" Days"),
             "95% CVaR": fmt_vals(sample["cvar"], pct=True),
-            "DD Relief / Drag": fmt_vals(sample["dd_relief_per_drag"], suffix="x"),
-            "CVaR Relief / Drag": fmt_vals(sample["cvar_relief_per_drag"], suffix="x"),
+            "DD Relief / Drag": fmt_vals(sample["dd_relief_per_drag"], suffix=" Days"),
+            "CVaR Relief / Drag": fmt_vals(sample["cvar_relief_per_drag"], pct=True),
         }
 
-        index = pd.Index([f"{w:.0%}" for w in sample.index], name="Strategy Weight")
+        cols = pd.Index([f"{w:.0%}" for w in sample.index], name="Strategy Weight")
 
-        return pd.DataFrame(columns, index=index).to_string()
+        return pd.DataFrame(rows, index=cols).T.to_string()
 
     def _generate_report(self) -> None:
         """
@@ -450,10 +465,16 @@ class StrategyConnector(AnalysisReport):
             sharex=True,
             gridspec_kw={"height_ratios": [3, 1, 1, 1]}
         )
+        
+        rename = {
+            "strat": "Strategy",
+            "bench": "Benchmark",
+            "optimised": "Sharpe-Optimised"
+        }
+        cols = {c : rename.get(c, c.capitalize()) for c in ["bench", "book", "strat", "combined", "optimised"]}
 
         # cumulative equity
         equity = (1 + self.daily).cumprod()
-        cols = {c: "Strategy" if c == "strat" else c.capitalize() for c in ["bench", "book", "strat", "combined", "optimised"]}
 
         for col, name in cols.items():
             axes[0].plot(equity.index, equity[col], label=name, linewidth=1, linestyle="--" if col == "bench" else "-")
@@ -499,11 +520,7 @@ class StrategyConnector(AnalysisReport):
         plt.tight_layout()
         plt.show()
 
-        def mark_weights(ax: plt.Axes) -> None:
-            ax.axvline(self._naive_w, color="gray", linestyle="--", linewidth=1, label="Combined Weight")
-            ax.axvline(self._opt_w, color="red", linestyle=":", linewidth=1, label="Optimised Weight")
-
-        # tradeoff: sharpe / drag / 95% es vs. strategy weight
+        # tradeoff: sharpe / drag / 95% es
         fig2, axes2 = plt.subplots(nrows=3, ncols=1, figsize=(14, 9), sharex=True)
 
         axes2[0].plot(self.tradeoff_series.index, self.tradeoff_series["sharpe"], linewidth=1)
@@ -511,33 +528,34 @@ class StrategyConnector(AnalysisReport):
         axes2[0].set_ylabel("Sharpe Ratio")
 
         axes2[1].plot(self.tradeoff_series.index, self.tradeoff_series["drag"], linewidth=1, color="firebrick")
-        axes2[1].axhline(0, color="black", linewidth=1, alpha=0.5)
         axes2[1].set_title("Calm-Period Drag vs. Strategy Weight", loc="left", fontweight="bold")
-        axes2[1].set_ylabel("Ann. Drag")
+        axes2[1].set_ylabel("Drag (Ann.)")
+        axes2[1].yaxis.set_major_formatter(PercentFormatter(1, decimals=0))
 
         axes2[2].plot(self.tradeoff_series.index, self.tradeoff_series["cvar"], linewidth=1, color="darkorange")
-        axes2[2].axhline(0, color="black", linewidth=1, alpha=0.5)
         axes2[2].set_title("95% CVaR vs. Strategy Weight", loc="left", fontweight="bold")
         axes2[2].set_ylabel("CVaR")
+        axes2[2].yaxis.set_major_formatter(PercentFormatter(1, decimals=1))
 
         for ax in axes2:
-            mark_weights(ax)
+            ax.axvline(self._opt_w, color="red", linestyle=":", linewidth=1, label="Sharpe-Optimised Weight")
             ax.label_outer()
             ax.margins(x=0)
-            ax.xaxis.set_major_formatter(ticker.PercentFormatter(xmax=1))
+            ax.xaxis.set_major_formatter(PercentFormatter(1))
+            ax.xaxis.set_major_locator(MultipleLocator(0.1))
 
         axes2[0].legend(loc="upper right", fontsize=9)
         axes2[-1].set_xlabel("Strategy Weight", fontweight="bold")
         plt.tight_layout()
         plt.show()
 
-        # tradeoff: max drawdown / dd days / recovery days vs. strategy weight
+        # tradeoff: max drawdown / dd days / recovery days
         fig3, axes3 = plt.subplots(nrows=3, ncols=1, figsize=(14, 9), sharex=True)
 
         axes3[0].plot(self.tradeoff_series.index, self.tradeoff_series["maxdd"], linewidth=1)
-        axes3[0].axhline(0, color="black", linewidth=1, alpha=0.5)
         axes3[0].set_title("Max Drawdown vs. Strategy Weight", loc="left", fontweight="bold")
         axes3[0].set_ylabel("Max Drawdown")
+        axes3[0].yaxis.set_major_formatter(PercentFormatter(1, decimals=0))
 
         axes3[1].plot(self.tradeoff_series.index, self.tradeoff_series["dd_days"], linewidth=1, color="firebrick")
         axes3[1].set_title("Max Drawdown Days vs. Strategy Weight", loc="left", fontweight="bold")
@@ -548,10 +566,11 @@ class StrategyConnector(AnalysisReport):
         axes3[2].set_ylabel("Days")
 
         for ax in axes3:
-            mark_weights(ax)
+            ax.axvline(self._opt_w, color="red", linestyle=":", linewidth=1, label="Sharpe-Optimised Weight")
             ax.label_outer()
             ax.margins(x=0)
-            ax.xaxis.set_major_formatter(ticker.PercentFormatter(xmax=1))
+            ax.xaxis.set_major_formatter(PercentFormatter(1))
+            ax.xaxis.set_major_locator(MultipleLocator(0.1))
 
         axes3[0].legend(loc="upper right", fontsize=9)
         axes3[-1].set_xlabel("Strategy Weight", fontweight="bold")
@@ -624,4 +643,4 @@ class StrategyConnector(AnalysisReport):
 
         tradeoff_table = self._format_tradeoff_table()
 
-        return render_sections(headers, all_groups) + "\n\n> Strategy/Book Weight Tradeoff Profile\n" + tradeoff_table
+        return f"{render_sections(headers, all_groups)}\n\n> Strategy/Book Weight Tradeoff Profile\n{tradeoff_table}"
