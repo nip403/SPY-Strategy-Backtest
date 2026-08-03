@@ -4,7 +4,6 @@ import dataclasses
 from pathlib import Path
 from typing import Optional, Any
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 import pandas as pd
 import numpy as np
 import warnings
@@ -78,15 +77,11 @@ class StrategyConnector(AnalysisReport):
 
         self.df.columns = ["strat", "book", "bench"]
 
-        # resample("D") bins every calendar day in the span (incl. weekends with no data), so
-        # restrict to the days actually present, then relabel back to plain dates - .loc[self.daily.index]
-        # elsewhere (e.g. _exact_leg_returns.to_daily) depends on this exact date-object index contract
         valid_days = self.df.index.floor("D").unique()
         self.daily = ((1 + self.df).resample("D").prod() - 1).loc[valid_days]
         self.daily.index = self.daily.index.date
 
-        # internal-only long/short daily legs at the portfolio's own construction AUM, used to
-        # bootstrap the mixing/optimiser search - not exposed as public df/daily columns
+        # internal-only long/short daily legs
         daily_long, daily_short = self._exact_leg_returns(np.array([self.portfolio.aum]))
         self._daily_long = pd.Series(daily_long[:, 0], index=self.daily.index)
         self._daily_short = pd.Series(daily_short[:, 0], index=self.daily.index)
@@ -100,6 +95,7 @@ class StrategyConnector(AnalysisReport):
 
         self._opt_w, self.daily["optimised"] = self._optimise_weight()
 
+        # reporting
         self.metrics: dict[str, SeriesMetrics] = {}
         self.relative: dict[str, RelativeMetrics] = {}
         self.incremental: dict[str, RelativeMetrics] = {}
@@ -181,7 +177,7 @@ class StrategyConnector(AnalysisReport):
             Matrix of short-leg daily returns across allocation scenarios.
 
         Returns np.ndarray
-            Matrix of mixed portfolio daily returns.
+            Matrix of mixed portfolio daily returns. Shape (n_days, scenarios)
         """
 
         n, k = short_daily_matrix.shape
@@ -206,7 +202,7 @@ class StrategyConnector(AnalysisReport):
             cum_l[0, :] = 1
             np.cumprod(1 + long_daily_matrix, axis=0, out=cum_l[1:, :])
 
-            # book + long reallocation + short 
+            # book + long reallocation + short
             p = (
                 weights * cum_l[1:, :] / cum_l[rebals, :]
                 + (1 - weights) * cum_b[1:, :] / cum_b[rebals, :]
@@ -280,150 +276,32 @@ class StrategyConnector(AnalysisReport):
         Stats describe the entire strategy + book mix across weight intervals.
         No setting for long/short only - ensure Portfolio has correct l/s permissions before connecting.
         
-        Calm-period cost filters out market crashes (simplistically) using a z-score # tentative. 
+        Calm-period cost filters out market crashes simplistically using a centred window returning the bottom 10% of returns.
+        This approach has many issues but is eyeballed to be the best indicator using utils.crash_period_estimators.
     
         Returns pd.DataFrame
             Columns (sharpe, drag, maxdd, dd_days, recovery, es)
              = Sharpe, Drag (calm-period cost), Max Drawdown, Max DD. Days, Exp. Shortfall, DD. Recovery Days, Expected Shortfall.  
         
         
-        look in connector.py and complete _tradeoff_profile. Have init call and save the tradeoff profile, and print a separate table with the tradeoff stats in str. Generate more figures in plot: one for sharpe/drag/es, and one for maxdd, days, and recovery. ask for permision before deciding on any other changes
-        
+        steps:
+        Have init call and save the tradeoff profile, 
+        and print a separate table with the tradeoff stats in str. 
+        Generate more figures in plot: one for sharpe/drag/es, and one for maxdd, days, and recovery.
         """
-
-        bench_daily = self.bench.resample("D").last().dropna()
-        bench_ret = bench_daily.pct_change().dropna()
-
-        def spans(mask: pd.Series) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
-            """Collapse a boolean daily mask into contiguous (start, end) date spans."""
-
-            out, start = [], None
-
-            for dt, flag in mask.items():
-                if flag and start is None:
-                    start = dt
-                elif not flag and start is not None:
-                    out.append((start, dt))
-                    start = None
-
-            if start is not None:
-                out.append((start, mask.index[-1]))
-
-            return out
-
-        def hmm_crash_mask(returns: pd.Series, n_iter: int = 25) -> pd.Series:
-            """Bare-bones 2-state Gaussian HMM (Baum-Welch EM) - crash = the lower-mean state."""
-
-            x = returns.to_numpy()
-            n = len(x)
-
-            mu = np.array([x.mean() + x.std(), x.mean() - x.std()])
-            var = np.array([x.var(), x.var() * 3])
-            trans = np.array([[0.98, 0.02], [0.05, 0.95]])
-            pi = np.array([0.9, 0.1])
-
-            for _ in range(n_iter):
-                b = np.clip(np.stack([
-                    np.exp(-0.5 * (x - mu[k]) ** 2 / var[k]) / np.sqrt(2 * np.pi * var[k])
-                    for k in range(2)
-                ], axis=1), 1e-300, None)
-
-                alpha, c = np.zeros((n, 2)), np.zeros(n)
-                alpha[0] = pi * b[0]
-                c[0] = alpha[0].sum()
-                alpha[0] /= c[0]
-
-                for t in range(1, n):
-                    alpha[t] = (alpha[t - 1] @ trans) * b[t]
-                    c[t] = alpha[t].sum()
-                    alpha[t] /= c[t]
-
-                beta = np.zeros((n, 2))
-                beta[-1] = 1
-
-                for t in range(n - 2, -1, -1):
-                    beta[t] = (trans @ (b[t + 1] * beta[t + 1])) / c[t + 1]
-
-                gamma = alpha * beta
-                gamma /= gamma.sum(axis=1, keepdims=True)
-
-                xi_sum = np.zeros((2, 2))
-
-                for t in range(n - 1):
-                    xi_sum += (alpha[t][:, None] * trans * (b[t + 1] * beta[t + 1])[None, :]) / c[t + 1]
-
-                pi = gamma[0]
-                trans = xi_sum / xi_sum.sum(axis=1, keepdims=True)
-
-                for k in range(2):
-                    w = gamma[:, k]
-                    mu[k] = (w @ x) / w.sum()
-                    var[k] = max((w @ (x - mu[k]) ** 2) / w.sum(), 1e-8)
-
-            crash_state = int(np.argmin(mu)) # crash = lower-mean regime
-
-            return pd.Series(gamma[:, crash_state] > 0.5, index=returns.index)
-
-        # crash-period estimators - all cheap/heuristic, for visual comparison only
-        estimators: dict[str, pd.Series] = {}
-
-        ewma_vol = bench_ret.ewm(span=self.lookback_window).std()
-        estimators["EWMA Vol"] = ewma_vol > ewma_vol.quantile(0.90)
-
-        centred_vol = bench_ret.rolling(self.lookback_window, center=True).std()
-        estimators["Centred Window Vol"] = centred_vol > centred_vol.quantile(0.90)
-
+        
+        bench = self.benchmark.resample("D").last().dropna()
         half_window = self.lookback_window // 2
-        centred_ret = bench_daily.shift(-half_window) / bench_daily.shift(half_window) - 1 # net move over a centred window, not just dispersion
-        estimators["Centred Window Return"] = centred_ret < centred_ret.quantile(0.10)
-
-        roll_mean = bench_ret.rolling(self.lookback_window).mean()
-        roll_std = bench_ret.rolling(self.lookback_window).std()
-        estimators["Rolling Z-Score"] = (bench_ret - roll_mean) / roll_std < -2
-
-        estimators["Full-Sample Percentile"] = bench_ret < bench_ret.quantile(0.05)
-
-        drawdown = compute_drawdown(bench_daily / bench_daily.iloc[0])
-        estimators["Drawdown Episode"] = drawdown <= -0.10
-
-        estimators["2-State HMM"] = hmm_crash_mask(bench_ret)
-
-        masks = {name: mask.reindex(bench_daily.index).fillna(False) for name, mask in estimators.items()}
-
-        # debug plot: full benchmark history on top, each estimator's flagged spans as a football-field bar row below
-        fig, (ax_main, ax_bars) = plt.subplots(
-            nrows=2,
-            ncols=1,
-            figsize=(14, 7),
-            sharex=True,
-            gridspec_kw={"height_ratios": [3, 1.5]},
-        )
-
-        ax_main.plot(bench_daily.index, bench_daily.values, color="black", linewidth=1)
-        ax_main.set_title("Benchmark (Full Sample) vs. Crash Period Estimators [DEBUG]", loc="left", fontweight="bold")
-        ax_main.set_ylabel("Benchmark Level")
-        ax_main.margins(x=0)
-
-        names = list(masks.keys())
-
-        for i, name in enumerate(names):
-            for start, end in spans(masks[name]):
-                x0 = mdates.date2num(start)
-                width = max(mdates.date2num(end) - x0, 0.8) # keep single-day spans visible
-
-                ax_bars.barh(i, width, left=x0, height=0.6, color="firebrick")
-
-        ax_bars.set_yticks(range(len(names)))
-        ax_bars.set_yticklabels(names, fontsize=8)
-        ax_bars.invert_yaxis()
-        ax_bars.margins(x=0)
-        ax_bars.set_xlabel("Date", fontweight="bold")
-
-        plt.tight_layout()
-        plt.show()
-        plt.close(fig)
-
-        return pd.DataFrame(masks)
+        centred_ret = bench.shift(-half_window) / bench.shift(half_window) - 1 # net move over a centred window, not just dispersion
+        crash = centred_ret < centred_ret.quantile(0.10)
+        
+        scenarios = np.linspace(0, 1, 1 / self.sweep_intervals)
+        #returns_matrix = self._mix_returns(scenarios, self._daily_long, self._daily_short)
+        
+        
+        #out = pd.DataFrame([], columns=scenarios)
+        
+        return #pd.DataFrame(masks)
 
     def _generate_report(self) -> None:
         """
