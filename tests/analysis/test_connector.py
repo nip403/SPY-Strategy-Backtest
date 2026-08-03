@@ -182,7 +182,7 @@ def test_cvar_monte_carlo_seeded_reproducible_across_runs(portfolio_factory, ran
 def test_tradeoff_profile_columns_and_index_bounds(connector):
     tp = connector.tradeoff_series
 
-    assert list(tp.columns) == ["sharpe", "drag", "maxdd", "dd_days", "recovery", "es"]
+    assert list(tp.columns) == ["sharpe", "drag", "maxdd", "dd_days", "recovery", "cvar", "dd_relief_per_drag", "cvar_relief_per_drag"]
     assert tp.index[0] == pytest.approx(0.0)
     assert tp.index[-1] == pytest.approx(1.0)
     assert len(tp) == round(1 / connector.weight_intervals) + 1
@@ -218,6 +218,10 @@ def test_tradeoff_profile_weight_zero_exactly_matches_book(connector):
     row0 = connector.tradeoff_series.iloc[0]
     assert row0["sharpe"] == pytest.approx(book.mean() / book.std() * np.sqrt(252))
     assert row0["maxdd"] == pytest.approx(expected_maxdd)
+    assert row0["drag"] == pytest.approx(0.0, abs=1e-9)
+    # relief vs. book is measured against this same row, so both ratios collapse to the 0/0 guard branch
+    assert row0["dd_relief_per_drag"] == 0.0
+    assert row0["cvar_relief_per_drag"] == 0.0
 
 def test_tradeoff_profile_drawdown_stats_have_expected_sign(connector):
     tp = connector.tradeoff_series
@@ -226,15 +230,52 @@ def test_tradeoff_profile_drawdown_stats_have_expected_sign(connector):
     assert (tp["dd_days"] >= 0).all()
     assert (tp["recovery"] >= 0).all()
 
-def test_tradeoff_profile_crash_columns_populated_with_enough_history(portfolio_factory, random_seed):
-    # connector's default n_days=25 fixture is too short for the centred lookback window to
-    # reliably flag any crash day - use a longer backtest so es/drag are actually exercised
+def test_tradeoff_profile_crash_mask_finds_days_with_enough_history(portfolio_factory, random_seed):
+    # regression guard: self.bench is tz-aware (minute OHLCV data), so reindexing its resampled
+    # DatetimeIndex straight against self.daily's plain-date index without first stripping the tz/time
+    # silently matches nothing, leaving every row at fill_value=False - connector's default n_days=25
+    # fixture is also too short for the centred lookback window to reliably flag any crash day
     portfolio = portfolio_factory(n_days=80)
     book, _ = generate_toy_equity(portfolio=portfolio, sharpe=1.0, volatility=0.15, beta=0.5, benchmark=portfolio.df["close"], random_seed=random_seed)
     sc = StrategyConnector(portfolio, book, portfolio.df["close"])
 
-    assert sc.tradeoff_series["es"].notna().any()
-    assert sc.tradeoff_series["drag"].notna().all()
+    bench = sc.bench.resample("D").last().dropna()
+    half_window = sc.lookback_window // 2
+    centred_ret = bench.shift(-half_window) / bench.shift(half_window) - 1
+    crash = centred_ret < centred_ret.quantile(0.10)
+    crash.index = crash.index.date
+    crash = crash.reindex(sc.daily.index, fill_value=False).to_numpy()
+
+    assert crash.sum() > 0
+
+def test_tradeoff_profile_cvar_is_mean_of_own_worst_five_percent(connector):
+    # cvar must be conditioned on each scenario's OWN return distribution (95% VaR threshold), not
+    # on the exogenous benchmark crash mask used for drag - cross-check via an independent, unvectorized
+    # per-column computation against the vectorized np.where/nanmean implementation
+    tp = connector.tradeoff_series
+    weights = tp.index.to_numpy()
+
+    long_daily, short_daily = connector._exact_block_leg_returns(weights)
+    returns_matrix = connector._mix_returns(weights, long_daily, short_daily)
+    var_95 = np.quantile(returns_matrix, 0.05, axis=0)
+
+    expected_cvar = np.array([
+        returns_matrix[returns_matrix[:, i] <= var_95[i], i].mean()
+        for i in range(returns_matrix.shape[1])
+    ])
+
+    np.testing.assert_allclose(tp["cvar"].to_numpy(), expected_cvar)
+
+def test_tradeoff_profile_relief_ratios_match_formula(connector):
+    tp = connector.tradeoff_series
+    maxdd0, cvar0 = tp["maxdd"].iloc[0], tp["cvar"].iloc[0]
+
+    nonzero_drag = tp[tp["drag"] != 0]
+    expected_dd_relief = (nonzero_drag["maxdd"] - maxdd0) / nonzero_drag["drag"]
+    expected_cvar_relief = (nonzero_drag["cvar"] - cvar0) / nonzero_drag["drag"]
+
+    np.testing.assert_allclose(nonzero_drag["dd_relief_per_drag"].to_numpy(), expected_dd_relief.to_numpy())
+    np.testing.assert_allclose(nonzero_drag["cvar_relief_per_drag"].to_numpy(), expected_cvar_relief.to_numpy())
 
 def test_format_tradeoff_table_decimates_to_ten_percent_steps(connector):
     text = connector._format_tradeoff_table()
@@ -243,7 +284,9 @@ def test_format_tradeoff_table_decimates_to_ten_percent_steps(connector):
         assert pct in text
 
     assert "Drag (Calm-Period Cost)" in text
-    assert "Expected Shortfall" in text
+    assert "95% CVaR" in text
+    assert "DD Relief / Drag" in text
+    assert "CVaR Relief / Drag" in text
 
 # ---- plot / str / report ------------------------------------------------
 

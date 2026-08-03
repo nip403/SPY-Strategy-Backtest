@@ -287,8 +287,8 @@ class StrategyConnector(AnalysisReport):
         This approach has many issues but is eyeballed to be the best indicator using utils.crash_period_estimators.
 
         Returns pd.DataFrame
-            Columns (sharpe, drag, maxdd, dd_days, recovery)
-             = Sharpe, Drag (calm-period cost), Max Drawdown, Max DD Days, DD Recovery Days.
+            Columns (sharpe, drag, maxdd, dd_days, recovery, cvar, dd_relief_per_drag, cvar_relief_per_drag)
+             = Sharpe, Drag (calm-period cost), Max Drawdown, Max DD Days, DD Recovery Days, 95% CVaR, (Max DD relief vs. book) / Drag, (CVaR relief vs. book) / Drag.
         """
 
         # crash detection
@@ -300,7 +300,11 @@ class StrategyConnector(AnalysisReport):
         crash.index = crash.index.date # strip tz-aware stamps + dt
         crash = crash.reindex(self.daily.index, fill_value=False).to_numpy()
 
-        weights = np.linspace(0, 1, round(1 / self.weight_intervals) + 1)
+        # guarantee 10% intervals for reporting
+        weights = np.unique(np.r_[
+            np.linspace(0, 1, round(1 / self.weight_intervals) + 1),
+            np.linspace(0, 1, 11),
+        ])
 
         # block-rebalanced mix adjusted for dynamic capacity costs - NOTE: assumes book has linear costing
         long_daily, short_daily = self._exact_block_leg_returns(weights)
@@ -329,30 +333,45 @@ class StrategyConnector(AnalysisReport):
         # calm-period drag: annualised return given up vs. holding the book alone on non-crash days only
         drag = (self.daily["book"].to_numpy()[~crash].mean() - returns_matrix[~crash, :].mean(axis=0)) * 252
 
+        var_95 = np.quantile(returns_matrix, 0.05, axis=0)
+        cvar = np.nanmean(np.where(returns_matrix <= var_95[None, :], returns_matrix, np.nan), axis=0)
+
+        # cost efficiency: crash-drawdown / tail-risk relief per unit of calm-period cost paid
+        dd_relief = np.divide(maxdd - maxdd[0], drag, out=np.zeros_like(drag), where=drag != 0)
+        cvar_relief = np.divide(cvar - cvar[0], drag, out=np.zeros_like(drag), where=drag != 0)
+
         return pd.DataFrame({
             "sharpe": sharpe,
             "drag": drag,
             "maxdd": maxdd,
             "dd_days": dd_days.astype(int),
             "recovery": recovery.astype(int),
+            "cvar": cvar,
+            "dd_relief_per_drag": dd_relief,
+            "cvar_relief_per_drag": cvar_relief,
         }, index=weights)
 
     def _format_tradeoff_table(self) -> str:
         """
-        Format self.tradeoff_series as a standalone table, decimated to 10% weight increments for
-        readability (self.tradeoff_series itself keeps the full self.weight_intervals resolution for plotting).
+        Format self.tradeoff_series as a standalone table.
+        Only shows 10% weight increments for readability.
+        
+        Returns str
+            Formatted table.
         """
 
-        step = max(1, round(0.10 / self.weight_intervals))
-        sample = self.tradeoff_series.iloc[::step]
-
+        sample = self.tradeoff_series.loc[np.linspace(0, 1, 11)]
+        fmt_vals = lambda arr, **kwargs: [format_value(i, **kwargs) for i in arr]
+        
         columns = {
-            "Sharpe": [format_value(v) for v in sample["sharpe"]],
-            "Drag (Calm-Period Cost)": [format_value(v, pct=True) for v in sample["drag"]],
-            "Max Drawdown": [format_value(v, pct=True) for v in sample["maxdd"]],
-            "Max DD Days": [format_value(v, suffix=" Days") for v in sample["dd_days"]],
-            "DD Recovery Days": [format_value(v, suffix=" Days") for v in sample["recovery"]],
-            "Expected Shortfall": [format_value(v, pct=True) for v in sample["es"]],
+            "Sharpe": fmt_vals(sample["sharpe"]),
+            "Drag (Calm-Period Cost)": fmt_vals(sample["drag"], pct=True),
+            "Max Drawdown": fmt_vals(sample["maxdd"], pct=True),
+            "Max DD Days": fmt_vals(sample["dd_days"], suffix=" Days"),
+            "DD Recovery Days": fmt_vals(sample["recovery"], suffix=" Days"),
+            "95% CVaR": fmt_vals(sample["cvar"], pct=True),
+            "DD Relief / Drag": fmt_vals(sample["dd_relief_per_drag"], suffix="x"),
+            "CVaR Relief / Drag": fmt_vals(sample["cvar_relief_per_drag"], suffix="x"),
         }
 
         index = pd.Index([f"{w:.0%}" for w in sample.index], name="Strategy Weight")
@@ -484,7 +503,7 @@ class StrategyConnector(AnalysisReport):
             ax.axvline(self._naive_w, color="gray", linestyle="--", linewidth=1, label="Combined Weight")
             ax.axvline(self._opt_w, color="red", linestyle=":", linewidth=1, label="Optimised Weight")
 
-        # tradeoff: sharpe / drag / expected shortfall vs. strategy weight
+        # tradeoff: sharpe / drag / 95% es vs. strategy weight
         fig2, axes2 = plt.subplots(nrows=3, ncols=1, figsize=(14, 9), sharex=True)
 
         axes2[0].plot(self.tradeoff_series.index, self.tradeoff_series["sharpe"], linewidth=1)
@@ -496,10 +515,10 @@ class StrategyConnector(AnalysisReport):
         axes2[1].set_title("Calm-Period Drag vs. Strategy Weight", loc="left", fontweight="bold")
         axes2[1].set_ylabel("Ann. Drag")
 
-        axes2[2].plot(self.tradeoff_series.index, self.tradeoff_series["es"], linewidth=1, color="darkorange")
+        axes2[2].plot(self.tradeoff_series.index, self.tradeoff_series["cvar"], linewidth=1, color="darkorange")
         axes2[2].axhline(0, color="black", linewidth=1, alpha=0.5)
-        axes2[2].set_title("Crash-Period Expected Shortfall vs. Strategy Weight", loc="left", fontweight="bold")
-        axes2[2].set_ylabel("Expected Shortfall")
+        axes2[2].set_title("95% CVaR vs. Strategy Weight", loc="left", fontweight="bold")
+        axes2[2].set_ylabel("CVaR")
 
         for ax in axes2:
             mark_weights(ax)
