@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from scipy.optimize import newton
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 import pandas as pd
 import numpy as np
 import random
@@ -349,3 +350,150 @@ def generate_toy_equity(
     ]
    
     return pd.Series(equity[:, 0], index=portfolio.df.index, name=labels[0]) if is_scalar else pd.DataFrame(equity, index=portfolio.df.index, columns=labels), valid
+
+def crash_period_estimators(benchmark: pd.Series, lookback_window: int = 21) -> None:
+    """
+    Debug function to eyeball different heuristics for determining crash periods.
+    Determined the use of Centred Window Return in StrategyConnector._tradeoff_profile.
+    
+    benchmark : pd.Series
+        Equity curve of the benchmark, intraday-indexed.
+    lookback_window : int = 21
+        Number of days used for lookback in rolling estimators.
+        Defaults to 21 (1 trading mth).
+    """
+    
+    benchmark = benchmark.resample("D").last().dropna()
+    bench_ret = benchmark.pct_change().dropna()
+
+    def spans(mask: pd.Series) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
+        """Collapse a boolean daily mask into contiguous (start, end) date spans."""
+
+        out, start = [], None
+
+        for dt, flag in mask.items():
+            if flag and start is None:
+                start = dt
+            elif not flag and start is not None:
+                out.append((start, dt))
+                start = None
+
+        if start is not None:
+            out.append((start, mask.index[-1]))
+
+        return out
+
+    def hmm_crash_mask(returns: pd.Series, n_iter: int = 25) -> pd.Series:
+        """2-state Gaussian HMM (Baum-Welch EM); crash = lower-mean state."""
+
+        x = returns.to_numpy()
+        n = len(x)
+
+        mu = np.array([x.mean() + x.std(), x.mean() - x.std()])
+        var = np.array([x.var(), x.var() * 3])
+        trans = np.array([[0.98, 0.02], [0.05, 0.95]])
+        pi = np.array([0.9, 0.1])
+
+        for _ in range(n_iter):
+            b = np.clip(np.stack([
+                np.exp(-0.5 * (x - mu[k]) ** 2 / var[k]) / np.sqrt(2 * np.pi * var[k])
+                for k in range(2)
+            ], axis=1), 1e-300, None)
+
+            alpha, c = np.zeros((n, 2)), np.zeros(n)
+            alpha[0] = pi * b[0]
+            c[0] = alpha[0].sum()
+            alpha[0] /= c[0]
+
+            for t in range(1, n):
+                alpha[t] = (alpha[t - 1] @ trans) * b[t]
+                c[t] = alpha[t].sum()
+                alpha[t] /= c[t]
+
+            beta = np.zeros((n, 2))
+            beta[-1] = 1
+
+            for t in range(n - 2, -1, -1):
+                beta[t] = (trans @ (b[t + 1] * beta[t + 1])) / c[t + 1]
+
+            gamma = alpha * beta
+            gamma /= gamma.sum(axis=1, keepdims=True)
+
+            xi_sum = np.zeros((2, 2))
+
+            for t in range(n - 1):
+                xi_sum += (alpha[t][:, None] * trans * (b[t + 1] * beta[t + 1])[None, :]) / c[t + 1]
+
+            pi = gamma[0]
+            trans = xi_sum / xi_sum.sum(axis=1, keepdims=True)
+
+            for k in range(2):
+                w = gamma[:, k]
+                mu[k] = (w @ x) / w.sum()
+                var[k] = max((w @ (x - mu[k]) ** 2) / w.sum(), 1e-8)
+
+        crash_state = int(np.argmin(mu)) # crash = lower-mean regime
+
+        return pd.Series(gamma[:, crash_state] > 0.5, index=returns.index)
+
+    # crash-period estimators
+    estimators = {}
+
+    ewma_vol = bench_ret.ewm(span=lookback_window).std()
+    estimators["EWMA Vol"] = ewma_vol > ewma_vol.quantile(0.90)
+
+    centred_vol = bench_ret.rolling(lookback_window, center=True).std()
+    estimators["Centred Window Vol"] = centred_vol > centred_vol.quantile(0.90)
+
+    half_window = lookback_window // 2
+    centred_ret = benchmark.shift(-half_window) / benchmark.shift(half_window) - 1 # net move over a centred window, not just dispersion
+    estimators["Centred Window Return"] = centred_ret < centred_ret.quantile(0.10)
+    
+    dd = benchmark / benchmark.cummax() - 1.0
+    worst = dd.rolling(2 * half_window + 1, center=True, min_periods=2 * half_window + 1).min()
+    estimators["Centred Window Absolute"] = worst < -0.15  
+
+    roll_mean = bench_ret.rolling(lookback_window).mean()
+    roll_std = bench_ret.rolling(lookback_window).std()
+    estimators["Rolling Z-Score"] = (bench_ret - roll_mean) / roll_std < -2
+
+    estimators["Full-Sample Percentile"] = bench_ret < bench_ret.quantile(0.05)
+
+    drawdown = compute_drawdown(benchmark / benchmark.iloc[0])
+    estimators["Drawdown Episode"] = drawdown <= -0.10
+
+    estimators["2-State HMM"] = hmm_crash_mask(bench_ret)
+
+    masks = {name: mask.reindex(benchmark.index).fillna(False) for name, mask in estimators.items()}
+
+    fig, (ax_main, ax_bars) = plt.subplots(
+        nrows=2,
+        ncols=1,
+        figsize=(14, 7),
+        sharex=True,
+        gridspec_kw={"height_ratios": [3, 1.5]},
+    )
+
+    ax_main.plot(benchmark.index, benchmark.values, color="black", linewidth=1)
+    ax_main.set_title("Benchmark (Full Sample) vs. Crash Period Estimators", loc="left", fontweight="bold")
+    ax_main.set_ylabel("Benchmark Level")
+    ax_main.margins(x=0)
+
+    names = list(masks.keys())
+
+    for i, name in enumerate(names):
+        for start, end in spans(masks[name]):
+            x0 = mdates.date2num(start)
+            width = max(mdates.date2num(end) - x0, 0.8) # keep single-day spans visible
+
+            ax_bars.barh(i, width, left=x0, height=0.6, color="firebrick")
+
+    ax_bars.set_yticks(range(len(names)))
+    ax_bars.set_yticklabels(names, fontsize=8)
+    ax_bars.invert_yaxis()
+    ax_bars.margins(x=0)
+    ax_bars.set_xlabel("Date", fontweight="bold")
+
+    plt.tight_layout()
+    plt.show()
+    plt.close(fig)
