@@ -295,7 +295,7 @@ class Portfolio:
         result.index = result.index.date
         
         return result
-
+    
     @property
     def sharpe(self) -> float:
         """
@@ -307,6 +307,17 @@ class Portfolio:
         """
 
         return float((r := self.stats["strat_ret"]).mean() / r.std() * 252**0.5)
+
+    @property
+    def vol(self) -> float:
+        """
+        Calculate the annualised strategy volatility.
+        
+        Returns float
+            Annualised volatility.
+        """
+
+        return float(self.stats["strat_ret"].std() * 252**0.5)
 
     def report(self, *, day: Optional[date] = None, start: Optional[date] = None, end: Optional[date] = None, plot: bool = True, decompose: bool = False, savepath: Optional[str | Path] = None) -> Tearsheet | PortfolioDecomposer | DailySnapshot:
         """
@@ -472,4 +483,4 @@ class Portfolio:
             Formatted portfolio description.
         """
 
-        return f"{__class__.__name__}(AUM: ${self.aum:,.0f}, Sharpe: {self.sharpe:.2f}, Period: [{self.t0} - {self.t1}])"
+        return f"{__class__.__name__}(AUM: ${self.aum:,.0f}, Sharpe: {self.sharpe:.2f}, Volatility: {self.vol:.2%}, Period: [{self.t0} - {self.t1}])"
