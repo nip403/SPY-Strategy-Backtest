@@ -2,7 +2,7 @@ from .core import Portfolio
 
 from .components.base import BacktestContext, StrategyComponent, ExecutionComponent, CostComponent
 from .components.strategy import BaseStrategy, RollingImmediateStopStrategy, RollingIntervalStopStrategy, QuarterHourSampleStrategy
-from .components.execution import NaiveExecution, CappedVolumeExecution, CappedVolumeRolloverExecution
+from .components.execution import NaiveExecution, CappedVolumeExecution, CappedVolumeRolloverExecution, WindowRolloverExecution
 from .components.cost_model import FlatCostModel, DynamicCostModel
 
 from .analysis.base import AnalysisReport
@@ -46,8 +46,10 @@ __all__ = [
     "RollingIntervalStopStrategy",
     "QuarterHourSampleStrategy",
 
+    "NaiveExecution",
     "CappedVolumeExecution",
     "CappedVolumeRolloverExecution",
+    "WindowRolloverExecution",
 
     "FlatCostModel",
     "DynamicCostModel",
