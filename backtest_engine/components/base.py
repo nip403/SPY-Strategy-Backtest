@@ -74,10 +74,13 @@ class ExecutionComponent(ABC):
             The Portfolio's cache, populated by fill().
 
         Returns np.ndarray
-            Matrix of positions with one column per AUM value.
+            Matrix of positions with one column per AUM value. 
+            A read-only broadcast view as the underlying data is AUM invariant.
         """
 
-        return np.tile(cache["position"].to_numpy()[:, None], (1, len(aum)))
+        position = cache["position"].to_numpy()[:, None]
+
+        return np.broadcast_to(position, (len(position), len(aum)))
 
 class CostComponent(ABC):
     @abstractmethod

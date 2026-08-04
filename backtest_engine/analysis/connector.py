@@ -83,6 +83,9 @@ class StrategyConnector(AnalysisReport):
         self.daily = ((1 + self.df).resample("D").prod() - 1).loc[valid_days]
         self.daily.index = self.daily.index.date
 
+        # populated by _exact_leg_returns on first call: None = not yet probed, False = AUM-sensitive (e.g. DynamicCostModel), else the cached (n_days, 1) AUM-invariant result
+        self._cached_legs = None
+
         # internal-only long/short daily legs
         daily_long, daily_short = self._exact_leg_returns(np.array([self.portfolio.aum]))
         self._daily_long = pd.Series(daily_long[:, 0], index=self.daily.index)
@@ -206,8 +209,41 @@ class StrategyConnector(AnalysisReport):
 
     def _exact_leg_returns(self, aums: np.ndarray) -> tuple[np.ndarray]:
         """
-        Calculates capacity-aware daily long/short leg returns at each AUM.
+        Calculates capacity-aware daily long/short leg returns at each AUM. 
+        If the connected execution/cost-model is AUM-invariant, all future calls fall back to cache.
+        
+        aums : np.ndarray
+            Portfolio capital values to evaluate, one per scenario.
 
+        Returns tuple[np.ndarray, np.ndarray]
+            (long_daily, short_daily), shape (n_days, len(aums)).
+        """
+
+        if self._cached_legs:
+            long_daily, short_daily = self._cached_legs
+            shape = (len(self.daily), len(aums))
+
+            return np.broadcast_to(long_daily, shape), np.broadcast_to(short_daily, shape)
+
+        long_daily, short_daily = self._compute_leg_returns(aums)
+
+        if self._cached_legs is False:
+            return long_daily, short_daily
+
+        probe_aum = aums[:1] + max(1, abs(float(aums[0])))
+        probe_long, probe_short = self._compute_leg_returns(probe_aum)
+
+        if np.array_equal(long_daily[:, :1], probe_long) and np.array_equal(short_daily[:, :1], probe_short):
+            self._cached_legs = (long_daily[:, :1], short_daily[:, :1])
+        else:
+            self._cached_legs = False
+
+        return long_daily, short_daily
+
+    def _compute_leg_returns(self, aums: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """
+        The actual capacity-aware position -> gross -> net -> daily-resample pipeline driving self._exact_leg_returns.
+        
         aums : np.ndarray
             Portfolio capital values to evaluate, one per scenario.
 

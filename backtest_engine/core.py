@@ -164,6 +164,16 @@ class Portfolio:
         """
 
         aum = np.asarray(aum, dtype=float)
+
+        # if endpoints are identical, this means components are AUM-invariant and we can just broadcast out a single column
+        if len(aum) > 1:
+            lo, hi = self.returns_matrix_components(aum[:1]), self.returns_matrix_components(aum[-1:])
+
+            if all(np.array_equal(a, b) for a, b in zip(lo, hi)):
+                shape = (len(self.df), len(aum))
+
+                return tuple(np.broadcast_to(matrix, shape) for matrix in lo)
+
         ret = self.df["ret"].to_numpy()[:, None]
 
         position_matrix = self.execution.fill_matrix(aum, self.cache)

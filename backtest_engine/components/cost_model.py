@@ -5,6 +5,25 @@ import numpy as np
 from typing import Optional
 from .base import BacktestContext, CostComponent
 
+def _abs_delta_position(position_matrix: np.ndarray) -> np.ndarray:
+    """
+    Calculates abs(delta-position) per bar.
+    When every column is identical (position_matrix is a broadcast view) diffs a single column and broadcasts to save memory.
+
+    position_matrix : np.ndarray
+        shape (datetimes, AUM scenarios)
+
+    Returns : np.ndarray
+        abs(delta_positions)
+    """
+
+    if position_matrix.strides[1] == 0:
+        single = np.abs(np.diff(position_matrix[:, :1], axis=0, prepend=position_matrix[:1, :1]))
+
+        return np.broadcast_to(single, position_matrix.shape)
+
+    return np.abs(np.diff(position_matrix, axis=0, prepend=position_matrix[:1]))
+
 class FlatCostModel(CostComponent):
     def __init__(self, *, commission: float = 0.0035, slippage: float = 0.001) -> None:
         """
@@ -65,7 +84,7 @@ class FlatCostModel(CostComponent):
             Matrix of returns.
         """
 
-        turnover = np.abs(np.diff(position_matrix, axis=0, prepend=position_matrix[:1]))
+        turnover = _abs_delta_position(position_matrix)
         close = cache["close"].to_numpy()[:, None]
 
         return gross_matrix - turnover * self.frictions / close
@@ -221,7 +240,7 @@ class DynamicCostModel(CostComponent):
 
         aum = np.asarray(aum, dtype=float)[None, :]
 
-        delta_leverage = np.abs(np.diff(position_matrix, axis=0, prepend=position_matrix[:1]))
+        delta_leverage = _abs_delta_position(position_matrix)
 
         close = cache["close"].to_numpy()[:, None]
         volume = cache["volume"].to_numpy()[:, None]
