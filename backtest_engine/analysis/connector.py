@@ -406,6 +406,10 @@ class StrategyConnector(AnalysisReport):
         cvar = np.nanmean(np.where(returns_matrix <= var_95[None, :], returns_matrix, np.nan), axis=0)
 
         # cost efficiency: crash-drawdown / tail-risk relief per unit of calm-period cost paid
+        # drag > 0 & relief > 0: insurance premium
+        # drag > 0 & relief < 0: unconditional loss
+        # drag < 0 & relief > 0: free protection
+        # drag < 0 & relief < 0: free cost, worse tail risk
         dd_relief = np.divide(maxdd - maxdd[0], drag, out=np.zeros_like(drag), where=drag != 0)
         cvar_relief = np.divide(cvar - cvar[0], drag, out=np.zeros_like(drag), where=drag != 0)
 
@@ -439,8 +443,8 @@ class StrategyConnector(AnalysisReport):
             "Max DD Days": fmt_vals(sample["dd_days"], suffix=" Days"),
             "DD Recovery Days": fmt_vals(sample["recovery"], suffix=" Days"),
             "95% CVaR": fmt_vals(sample["cvar"], pct=True),
-            "DD Relief / Drag": fmt_vals(sample["dd_relief_per_drag"], suffix=" Days"),
-            "CVaR Relief / Drag": fmt_vals(sample["cvar_relief_per_drag"], pct=True),
+            "DD Relief / Drag": fmt_vals(sample["dd_relief_per_drag"], suffix=" x"),
+            "CVaR Relief / Drag": fmt_vals(sample["cvar_relief_per_drag"], suffix=" x"),
         }
 
         cols = pd.Index([f"{w:.0%}" for w in sample.index], name="Strategy Weight")
