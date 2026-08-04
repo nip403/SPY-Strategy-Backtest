@@ -86,8 +86,8 @@ def trade_stats(position: pd.Series, net_ret: pd.Series) -> pd.DataFrame:
     is_close = trade_id.notna() & (trade_id != trade_id.shift(-1))
 
     trade_returns = (1 + net_ret).groupby(trade_id).prod() - 1
-    is_win = trade_id[is_close].map(trade_returns)
-    
+    is_win = (trade_id[is_close].map(trade_returns) > 0).reindex(position.index, fill_value=False)
+
     return pd.DataFrame({
         "trade_count": is_close.astype(int),
         "trade_wins": is_win.astype(int),

@@ -275,8 +275,7 @@ class Portfolio:
 
         days = self.df.index.floor("D").unique()
 
-        strat_equity = self.df["equity_curve"].resample("D").last().loc[days]
-        bench_equity = self.df["benchmark"].resample("D").last().loc[days]
+        (_, strat_equity), (_, bench_equity) = self.df[["equity_curve", "benchmark"]].resample("D").last().loc[days].items()
 
         # daily returns
         strat_ret = strat_equity.pct_change()
@@ -290,7 +289,7 @@ class Portfolio:
         bench_dd = compute_drawdown(bench_equity)
 
         # trade count/wins, triggered on trade closes
-        trades = trade_stats(self.df["position"], self.df["net_ret"])[["trade_count", "trade_wins"]].resample("D").sum().loc[days].astype(int)
+        trades = trade_stats(self.df["position"], self.df["net_ret"]).resample("D").sum().loc[days]
 
         result = pd.DataFrame({
             "strat_equity": strat_equity,

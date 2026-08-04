@@ -49,8 +49,9 @@ class CappedVolumeRolloverExecution(ExecutionComponent):
         volume = cache.setdefault("volume", df["volume"])
         raw_capacity = volume * close * self.participation_ceiling # capacity, AUM not yet divided in
 
-        # split backtest into regimes (that have the same target); increment every time target changes
-        mask = target != target.shift(1)
+        # split backtest into regimes (that have the same target); increment every time target changes.
+        prev = target.shift(1)
+        mask = (target != prev) & ~(target.isna() & prev.isna())
         mask.iloc[0] = True
 
         cache["rollover"] = pd.DataFrame({"target": target, "raw_capacity": raw_capacity, "regime": mask.cumsum()})
