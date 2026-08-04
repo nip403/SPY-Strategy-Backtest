@@ -72,7 +72,7 @@ def _preprocess(alpaca_df: pd.DataFrame) -> pd.DataFrame:
     
     df = alpaca_df.tz_convert("America/New_York", level="timestamp").droplevel("symbol")
     df = df[df.index.dayofweek < 5].between_time("09:30", "15:59")[["open", "high", "low", "close", "volume"]].sort_index()
-
+    
     # minutes since midnight instead of raw datetime.time - ~6x less memory and much faster for downstream groupby (datetime.time interface never used)
     df["time"] = (df.index.hour * 60 + df.index.minute).astype("int16")
 

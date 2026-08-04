@@ -307,15 +307,16 @@ def generate_toy_equity(
     volatility = volatility[valid]
     beta = beta[valid]
     idiosyncratic_variance = idiosyncratic_variance[valid]
+    beta_bench = beta * benchmark[:, None]
 
     def solve_alpha() -> np.ndarray:
         """
         solve residual expected return x against benchmark s.t. pi^N_{t=1}(1 + x + beta * R_mkt_t) = 1 + R_toy
         Then, f(x) = ln(product) - ln(1 + R_toy) = 0, and root find.
         """
-        
+
         target = np.log1p(expected_return) * len(benchmark) / periods_per_year
-        base = 1 + beta * benchmark[:, None]
+        base = 1 + beta_bench
         
         # start with arithmetic return approximation
         x0 = (expected_return - beta * benchmark.mean() * periods_per_year) / periods_per_year
@@ -342,7 +343,7 @@ def generate_toy_equity(
         **kwargs,
     )
     
-    equity = (1 + beta * benchmark[:, None] + idiosyncratic_returns).cumprod(axis=0) * starting_book_value
+    equity = (1 + beta_bench + idiosyncratic_returns).cumprod(axis=0) * starting_book_value
 
     labels = [
         f"{f"S:{r / v if v else 0:.1f}" if sharpe is not None else f"R:{r:.3f}"}|σ:{v:.3f}|β:{b:.1f}"

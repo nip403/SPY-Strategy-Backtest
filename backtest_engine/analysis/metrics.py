@@ -195,13 +195,16 @@ def compute_relative_metrics(returns: pd.Series, reference: pd.Series) -> Relati
         Populated statistics.
     """
 
-    beta = _safe_div(returns.cov(reference), reference.var())
-    alpha = float((returns.mean() - beta * reference.mean()) * 252)
-    correlation = _safe_div(returns.cov(reference), returns.std() * reference.std())  # avoids pandas .corr()'s unguarded internal np.corrcoef division
+    cov_val = returns.cov(reference)
+    ret_mean, ref_mean = returns.mean(), reference.mean()
+
+    beta = _safe_div(cov_val, reference.var())
+    alpha = float((ret_mean - beta * ref_mean) * 252)
+    correlation = _safe_div(cov_val, returns.std() * reference.std())  # avoids pandas .corr()'s unguarded internal np.corrcoef division
     r_squared = float(correlation ** 2)
 
     tracking_error = (returns - reference).std() * np.sqrt(252)
-    information_ratio = _safe_div((returns.mean() - reference.mean()) * 252, tracking_error)
+    information_ratio = _safe_div((ret_mean - ref_mean) * 252, tracking_error)
 
     residual = returns - (reference * beta + alpha / 252)
     idiosyncratic_risk = float(residual.std()) * np.sqrt(252)
@@ -211,10 +214,10 @@ def compute_relative_metrics(returns: pd.Series, reference: pd.Series) -> Relati
     up_market_capture = _safe_div(returns[up_mask].mean(), reference[up_mask].mean()) if up_mask.any() else float("nan")
     down_market_capture = _safe_div(returns[down_mask].mean(), reference[down_mask].mean()) if down_mask.any() else float("nan")
 
-    ref_lower_mask = reference <= reference.quantile(0.10)
-    ref_upper_mask = reference >= reference.quantile(0.90)
-    ret_lower_q = returns.quantile(0.10)
-    ret_upper_q = returns.quantile(0.90)
+    ref_lower_q, ref_upper_q = reference.quantile([0.10, 0.90])
+    ret_lower_q, ret_upper_q = returns.quantile([0.10, 0.90])
+    ref_lower_mask = reference <= ref_lower_q
+    ref_upper_mask = reference >= ref_upper_q
     lower_tail_dependency = _safe_div(float(((returns <= ret_lower_q) & ref_lower_mask).sum()), float(ref_lower_mask.sum()))
     upper_tail_dependency = _safe_div(float(((returns >= ret_upper_q) & ref_upper_mask).sum()), float(ref_upper_mask.sum()))
 

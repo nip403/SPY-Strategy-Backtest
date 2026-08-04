@@ -16,6 +16,7 @@ dependencies = [
     "matplotlib>=3.8",
     "statsmodels>=0.14",
     "alpaca-py>=0.33",
+    "numba>=0.59",
 ]
 [build-system]
 requires = ["hatchling"]

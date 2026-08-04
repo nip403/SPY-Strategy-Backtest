@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import pandas as pd
 import numpy as np
+import numba
 from .base import BacktestContext, StrategyComponent
 
+@numba.njit(cache=True)
 def resolve_positions(signals: np.ndarray) -> np.ndarray:
     """
     Sequentially resolve entry/exit/end-of-day signals into a held positions.
@@ -16,10 +18,7 @@ def resolve_positions(signals: np.ndarray) -> np.ndarray:
     firing while held is treated as a direct flip, taking priority over a plain stop-out.
 
     signals : np.ndarray
-        Columns: long_entry, short_entry, long_exit, short_exit
-        Raw per-bar boolean signals.
-    end_of_day : np.ndarray
-        Boolean array, True on bars where any open position must be forced flat.
+        Boolean array, columns: long_entry, short_entry, long_exit, short_exit, end_of_day.
 
     Returns np.ndarray
         Resolved position (sign) per bar.
@@ -28,9 +27,9 @@ def resolve_positions(signals: np.ndarray) -> np.ndarray:
     position = np.empty(len(signals))
     state = 0
 
-    for i, s in enumerate(signals.tolist()):
-        le, se, lx, sx, eod = s
-        
+    for i in range(len(signals)):
+        le, se, lx, sx, eod = signals[i, 0], signals[i, 1], signals[i, 2], signals[i, 3], signals[i, 4]
+
         if eod:
             state = 0
         elif state > 0: # long
@@ -44,7 +43,7 @@ def resolve_positions(signals: np.ndarray) -> np.ndarray:
             elif sx: # exit
                 state = 0
         else: # entries
-            if le: 
+            if le:
                 state = 1
             elif se:
                 state = -1

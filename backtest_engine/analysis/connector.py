@@ -52,6 +52,7 @@ class StrategyConnector(AnalysisReport):
                 Lookback window for rolling-z in self._tradeoff_profile, defaults to 1 trading month.
             weight_intervals : float = 0.01
                 The interval to sweep strategy to book mix in self._tradeoff_profile, defaults to 1%.
+                Rounded to the nearest basis point (4dp) to prevent floating point errors.
         """
         
         config = {**self.DEFAULT_PARAMS, **(config or {})}
@@ -162,19 +163,21 @@ class StrategyConnector(AnalysisReport):
         weights : np.ndarray
             Strategy allocation weights for each return scenario.
         long_daily_matrix : np.ndarray
-            Matrix of long-leg daily returns across allocation scenarios. Ignored when self._has_long_leg is False.
+            Matrix of long-leg daily returns, either one column per scenario or a single column broadcast across all of them. 
+            Ignored when self._has_long_leg is False.
         short_daily_matrix : np.ndarray
-            Matrix of short-leg daily returns across allocation scenarios.
+            Matrix of short-leg daily returns, either one column per scenario or a single column broadcast across all of them.
 
         Returns np.ndarray
             Matrix of mixed portfolio daily returns. Shape (n_days, scenarios)
         """
 
-        n, k = short_daily_matrix.shape
+        n, k = short_daily_matrix.shape[0], len(weights)
         book_daily = self.daily["book"].values[:, None] # reshape to broadcast
 
-        # component cumprods
-        cum_s = np.empty((n + 1, k))
+        # component cumprods, each sized to its input's width 
+        # aum invariant leg columns stay a single column and is broadcasted only at the combine step
+        cum_s = np.empty((n + 1, short_daily_matrix.shape[1]))
         cum_b = np.empty((n + 1, 1))
 
         cum_s[0, :] = cum_b[0, 0] = 1
@@ -188,7 +191,7 @@ class StrategyConnector(AnalysisReport):
         short_term = weights * (cum_s[1:, :] / cum_s[rebals, :] - 1)
 
         if self._has_long_leg:
-            cum_l = np.empty((n + 1, k))
+            cum_l = np.empty((n + 1, long_daily_matrix.shape[1]))
             cum_l[0, :] = 1
             np.cumprod(1 + long_daily_matrix, axis=0, out=cum_l[1:, :])
 
@@ -283,10 +286,11 @@ class StrategyConnector(AnalysisReport):
             (long_daily, short_daily), each of shape (n_days, len(weights)).
         """
         
+        # single shared column, not tiled to len(weights) - to avoid cumprod across multiple identical cols
         approx_mixed = self._mix_returns(
             weights,
-            np.tile(self._daily_long.values[:, None], (1, len(weights))),
-            np.tile(self._daily_short.values[:, None], (1, len(weights))),
+            self._daily_long.values[:, None],
+            self._daily_short.values[:, None],
         )
 
         # portfolio & book growth at the start of each rebalance period, per weight scenario
@@ -320,10 +324,12 @@ class StrategyConnector(AnalysisReport):
             (long_daily, short_daily), each of shape (n_days, len(weights)).
         """
 
+        # single shared column, not tiled to len(weights) - _mix_returns broadcasts a width-1 leg
+        # against `weights` internally, so this avoids cumprod-ing len(weights) identical columns
         approx_mixed = self._mix_returns(
             weights,
-            np.tile(self._daily_long.values[:, None], (1, len(weights))),
-            np.tile(self._daily_short.values[:, None], (1, len(weights))),
+            self._daily_long.values[:, None],
+            self._daily_short.values[:, None],
         )
 
         # average portfolio growth factor
@@ -364,11 +370,11 @@ class StrategyConnector(AnalysisReport):
         crash.index = crash.index.date # strip tz-aware stamps + dt
         crash = crash.reindex(self.daily.index, fill_value=False).to_numpy()
 
-        # guarantee 10% intervals for reporting
-        weights = np.unique(np.r_[
+        # guarantee 10% intervals for reporting - rounded before dedup since linspace(0,1,101)[30]
+        weights = np.unique(np.round(np.r_[
             np.linspace(0, 1, round(1 / self.weight_intervals) + 1),
             np.linspace(0, 1, 11),
-        ])
+        ], 4))
 
         long_daily, short_daily = self._approx_aum_leg_returns(portfolio, weights)
         returns_matrix = self._mix_returns(weights, long_daily, short_daily)
@@ -423,7 +429,7 @@ class StrategyConnector(AnalysisReport):
             Formatted table.
         """
 
-        sample = self.tradeoff_series.loc[np.linspace(0, 1, 11)]
+        sample = self.tradeoff_series.loc[np.round(np.linspace(0, 1, 11), 4)]
         fmt_vals = lambda arr, **kwargs: [format_value(i, **kwargs) for i in arr]
         
         rows = {

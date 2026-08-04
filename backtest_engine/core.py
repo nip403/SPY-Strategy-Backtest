@@ -177,7 +177,11 @@ class Portfolio:
         ret = self.df["ret"].to_numpy()[:, None]
 
         position_matrix = self.execution.fill_matrix(aum, self.cache)
-        gross_matrix = np.vstack([np.zeros((1, len(aum))), position_matrix[:-1]]) * ret
+
+        gross_matrix = np.empty_like(position_matrix)
+        gross_matrix[0, :] = 0
+        gross_matrix[1:, :] = position_matrix[:-1] * ret[1:]
+
         net_matrix = self.cost_model.returns_matrix(aum, position_matrix, gross_matrix, self.cache)
 
         return position_matrix, gross_matrix, net_matrix

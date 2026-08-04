@@ -168,29 +168,23 @@ class PortfolioDecomposer(AnalysisReport):
         fig2.suptitle("Daily Returns Distributions vs Benchmark (SymLog-Scaled)", fontsize=14, fontweight="bold", y=0.96)
 
         hist_configs = [
-            {"label": "Strategy vs Benchmark", "series_col": "Strategy", "pos": gs[0, 0]},
-            {"label": "Long-Only vs Benchmark", "series_col": "Long-Only", "pos": gs[0, 1]},
-            {"label": "Short-Only vs Benchmark", "series_col": "Short-Only", "pos": gs[1, 0]}
+            {"label": "Strategy vs Benchmark", "series_col": "Strategy", "pos": gs[0, 0], "metrics": self.components["strategy"].strategy},
+            {"label": "Long-Only vs Benchmark", "series_col": "Long-Only", "pos": gs[0, 1], "metrics": self.components["long"].strategy},
+            {"label": "Short-Only vs Benchmark", "series_col": "Short-Only", "pos": gs[1, 0], "metrics": self.components["short"].strategy},
         ]
+
+        bench_metrics = self.components["strategy"].benchmark
 
         for config in hist_configs:
             ax_sub = fig2.add_subplot(config["pos"])
 
             xlim = max(ret[config["series_col"]].abs().std(), ret["Benchmark"].abs().std()) * 4.5
+            bins = np.linspace(-xlim, xlim, 51)
 
-            ax_sub.hist(ret[config["series_col"]].values, bins=np.linspace(-xlim, xlim, 51), color=colours[config["series_col"]], alpha=0.4, histtype="stepfilled", density=True, align="mid", label=config["series_col"])
-            ax_sub.hist(ret["Benchmark"].values, bins=np.linspace(-xlim, xlim, 51), color=colours["Benchmark"], alpha=0.25, histtype="stepfilled", density=True, align="mid", label="Benchmark")
+            n_series, _, _ = ax_sub.hist(ret[config["series_col"]].values, bins=bins, color=colours[config["series_col"]], alpha=0.4, histtype="stepfilled", density=True, align="mid", label=config["series_col"])
+            n_bench, _, _ = ax_sub.hist(ret["Benchmark"].values, bins=bins, color=colours["Benchmark"], alpha=0.25, histtype="stepfilled", density=True, align="mid", label="Benchmark")
 
-            ax_sub.set_yscale(
-                "symlog",
-                linthresh=max(
-                    max(
-                        np.histogram(ret[config["series_col"]].values, bins=np.linspace(-xlim, xlim, 51), density=True)[0].max(),
-                        np.histogram(ret["Benchmark"].values, bins=np.linspace(-xlim, xlim, 51), density=True)[0].max()
-                    ) * 0.1,
-                    1e-5,
-                )
-            )
+            ax_sub.set_yscale("symlog", linthresh=max(max(n_series.max(), n_bench.max()) * 0.1, 1e-5))
 
             ax_sub.set_title(config["label"], fontsize=11, fontweight="bold")
             ax_sub.set_xlim(-xlim, xlim)
@@ -198,17 +192,18 @@ class PortfolioDecomposer(AnalysisReport):
             ax_sub.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"{x * 100:.1f}%"))
             ax_sub.legend(loc="upper left", fontsize=9)
 
+            m = config["metrics"]
             stats_text = (
                 f"[{config['series_col']}]\n"
-                f"Mean: {ret[config['series_col']].mean() * 100:.3f}%\n"
-                f"Std:  {ret[config['series_col']].std() * 100:.2f}%\n"
-                f"Skew: {ret[config['series_col']].skew():.2f}\n"
-                f"Kurt: {ret[config['series_col']].kurt():.2f}\n\n"
+                f"Mean: {m.avg_daily_return * 100:.3f}%\n"
+                f"Std:  {m.ann_vol / np.sqrt(252) * 100:.2f}%\n"
+                f"Skew: {m.skew:.2f}\n"
+                f"Kurt: {m.kurt:.2f}\n\n"
                 f"[Benchmark]\n"
-                f"Mean: {ret['Benchmark'].mean() * 100:.3f}%\n"
-                f"Std:  {ret['Benchmark'].std() * 100:.2f}%\n"
-                f"Skew: {ret['Benchmark'].skew():.2f}\n"
-                f"Kurt: {ret['Benchmark'].kurt():.2f}"
+                f"Mean: {bench_metrics.avg_daily_return * 100:.3f}%\n"
+                f"Std:  {bench_metrics.ann_vol / np.sqrt(252) * 100:.2f}%\n"
+                f"Skew: {bench_metrics.skew:.2f}\n"
+                f"Kurt: {bench_metrics.kurt:.2f}"
             )
             ax_sub.text(
                 0.96, 0.96, stats_text,

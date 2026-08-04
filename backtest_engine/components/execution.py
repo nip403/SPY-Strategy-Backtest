@@ -2,7 +2,77 @@ from __future__ import annotations
 
 import pandas as pd
 import numpy as np
+import numba
 from .base import BacktestContext, ExecutionComponent
+
+@numba.njit(cache=True)
+def _resolve_regime_starts(regime_target: np.ndarray, regime_maxcap: np.ndarray) -> np.ndarray:
+    """
+    Numba core of CappedVolumeRolloverExecution.fill_matrix's regime resolution.
+    Greedily walks regime targets to derive each regime's starting position.
+
+    regime_target : np.ndarray
+        Target position per regime, shape (regimes,).
+    regime_maxcap : np.ndarray
+        Cumulative fill capacity reached by the end of each regime, one column per AUM, shape (regimes, aum_scenarios).
+
+    Returns np.ndarray
+        Starting position of each regime, one column per AUM, shape (regimes, aum_scenarios).
+    """
+
+    n_regimes, n_aum = regime_maxcap.shape
+    p_start = np.empty((n_regimes, n_aum))
+    p_current = np.zeros(n_aum)
+
+    for i in range(n_regimes):
+        t = regime_target[i]
+        p_start[i] = p_current
+
+        for j in range(n_aum):
+            cur = p_current[j]
+            cap = regime_maxcap[i, j]
+
+            if t > cur:
+                p_current[j] = min(t, cur + cap)
+            elif t < cur:
+                p_current[j] = max(t, cur - cap)
+
+    return p_start
+
+@numba.njit(cache=True)
+def _resolve_ioc_fills(targets: np.ndarray, caps: np.ndarray) -> np.ndarray:
+    """
+    Numba core of CappedVolumeExecution.fill_matrix's event resolution.
+    Greedily walks signal-change events to derive each event's fill.
+    
+    targets : np.ndarray
+        Target position at each signal-change event, shape (events,).
+    caps : np.ndarray
+        Per-event fill capacity, one column per AUM, shape (events, aum_scenarios).
+
+    Returns np.ndarray
+        Filled position at each event, one column per AUM, shape (events, aum_scenarios).
+    """
+
+    n_events, n_aum = caps.shape
+    fills = np.empty((n_events, n_aum))
+    p_current = np.zeros(n_aum)
+
+    for i in range(n_events):
+        t = targets[i]
+
+        for j in range(n_aum):
+            cur = p_current[j]
+            cap = caps[i, j]
+
+            if t > cur:
+                p_current[j] = min(t, cur + cap)
+            elif t < cur:
+                p_current[j] = max(t, cur - cap)
+
+            fills[i, j] = p_current[j]
+
+    return fills
 
 class NaiveExecution(ExecutionComponent):
     def fill(self, df: pd.DataFrame, ctx: BacktestContext, cache: dict) -> pd.DataFrame:
@@ -91,17 +161,8 @@ class CappedVolumeRolloverExecution(ExecutionComponent):
         regime_target = pd.Series(target).groupby(regime).first().to_numpy() # (R,)
         regime_maxcap = pd.DataFrame(cum_cap).groupby(regime).last().to_numpy() # (R, A)
 
-        p_start = np.empty_like(regime_maxcap)
-        p_current = np.zeros_like(aum)
-
-        for i, t in enumerate(regime_target): # O(regimes), vectorised across AUM
-            p_start[i] = p_current
-
-            # greedily resolving regime endpoints
-            p_current = np.where(
-                t > p_current, np.minimum(t, p_current + regime_maxcap[i]),
-                np.where(t < p_current, np.maximum(t, p_current - regime_maxcap[i]), p_current),
-            )
+        # greedily resolving regime endpoints, O(regimes)
+        p_start = _resolve_regime_starts(regime_target, np.ascontiguousarray(regime_maxcap))
 
         p_start_bar = p_start[regime] # broadcast regime-level starts back to bar level
         target_col = target[:, None]
@@ -184,15 +245,8 @@ class CappedVolumeExecution(ExecutionComponent):
 
         caps = np.divide(raw_caps, aum, out=np.zeros((len(raw_caps), len(aum))), where=(aum > 0))
 
-        p_current = np.zeros_like(aum)
-        fills = np.empty_like(caps)
-
-        for i, t in enumerate(targets): # O(events), vectorised across AUM
-            fills[i] = np.where(
-                t > p_current, np.minimum(t, p_current + caps[i]),
-                np.where(t < p_current, np.maximum(t, p_current - caps[i]), p_current),
-            )
-            p_current = fills[i]
+        # greedily resolving fills at each signal event, O(events)
+        fills = _resolve_ioc_fills(np.ascontiguousarray(targets), np.ascontiguousarray(caps))
 
         out = np.full((len(signal_mask), len(aum)), np.nan)
         out[signal_mask] = fills
