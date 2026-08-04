@@ -74,6 +74,54 @@ def _resolve_ioc_fills(targets: np.ndarray, caps: np.ndarray) -> np.ndarray:
 
     return fills
 
+@numba.njit(cache=True)
+def _resolve_window_fill(regime_starts: np.ndarray, window: np.ndarray, prev_target: np.ndarray, regime_target: np.ndarray, volume: np.ndarray) -> np.ndarray:
+    """
+    Numba core of RegimeVWAPExecution.fill's ramp resolution.
+    Within each regime's window, ramps position from the target to target in proportion to cumulative volume and hold for remaining bars.
+
+    regime_starts : np.ndarray
+        Row index of each regime's first bar, shape (regimes,).
+    window : np.ndarray
+        Ramp length in bars for each regime, shape (regimes,). Guaranteed by the caller to be <= that
+        regime's own length, so the ramp always completes within its own regime.
+    prev_target : np.ndarray
+        Position held immediately before each regime, shape (regimes,).
+    regime_target : np.ndarray
+        Target position of each regime, shape (regimes,).
+    volume : np.ndarray
+        Per-bar volume, shape (bars,).
+
+    Returns np.ndarray
+        Ramped position per bar, shape (bars,).
+    """
+
+    n = len(volume)
+    position = np.empty(n)
+
+    for i, start in enumerate(regime_starts):
+        start = regime_starts[i]
+        end = regime_starts[i + 1] if i + 1 < len(regime_starts) else n
+        w = window[i]
+        p0 = prev_target[i]
+        t = regime_target[i]
+
+        total = 0
+        
+        for j in range(start, start + w):
+            total += volume[j]
+
+        cum = 0
+        for j in range(start, start + w):
+            cum += volume[j]
+            frac = cum / total if total > 0 else (j - start + 1) / w
+            position[j] = p0 + frac * (t - p0)
+
+        for j in range(start + w, end):
+            position[j] = t
+
+    return position
+
 class NaiveExecution(ExecutionComponent):
     def fill(self, df: pd.DataFrame, ctx: BacktestContext, cache: dict) -> pd.DataFrame:
         """
@@ -89,6 +137,7 @@ class CappedVolumeRolloverExecution(ExecutionComponent):
         """
         Caps participation to a fixed share of contemporaneous volume to properly test capacity.
         Any unfilled quantity of the desired trade size is rolled over until it is entirely filled or a new position target is hit.
+        Rollovers could result in backtests eating overnight gaps.
 
         participation_ceiling : float = 0.1
             The maximum share of instantaneous volume the backtest is allowed to trade at any minute.
@@ -174,6 +223,7 @@ class CappedVolumeExecution(ExecutionComponent):
     def __init__(self, *, participation_ceiling: float = 0.1) -> None:
         """
         An Immediate-or-Cancel fill model constrained to a fixed % of minute volume.
+        Leftover volume could result in backtests eating overnight gaps.
 
         participation_ceiling : float = 0.1
             The maximum share of instantaneous volume the backtest is allowed to trade at any minute.
@@ -253,3 +303,61 @@ class CappedVolumeExecution(ExecutionComponent):
 
         # match the portfolio's actual starting state
         return pd.DataFrame(out, index=ioc.index).ffill().fillna(0).to_numpy()
+
+class WindowRolloverExecution(ExecutionComponent):
+    def __init__(self, *, window: int) -> None:
+        """
+        Spreads both the position and resulting cost proportionally to volume over the first min(ramp_window, trade length, bars left in session) bars of each regime (trade block).
+        Fill fraction is independent of AUM - it is a fixed assumed execution schedule and not a capacity constraint. 
+       
+        window : int
+            Maximum number of bars to spread each trade over (e.g. the measured alpha-decay window).
+        """
+
+        self.window = window
+
+    def fill(self, df: pd.DataFrame, ctx: BacktestContext, cache: dict) -> pd.DataFrame:
+        """
+        Fill target positions proportional to volume over each regime's window.
+
+        df : pd.DataFrame
+            Market data containing the "position" column produced by a Strategy.
+        ctx : BacktestContext
+            Shared portfolio parameters for the backtest run.
+        cache : dict
+            This Portfolio's cache.
+
+        Returns pd.DataFrame
+            DataFrame with "position" replaced by the ramped fill. The ramp schedule never depends on
+            AUM, so the base ExecutionComponent.fill_matrix (broadcast) applies unmodified.
+        """
+
+        target = df["position"]
+        volume = df["volume"].to_numpy(dtype=np.float64)
+        n = len(target)
+
+        # logic identical to CappedVolumeRolloverExecution
+        prev = target.shift(1)
+        mask = (target != prev) & ~(target.isna() & prev.isna())
+        mask.iloc[0] = True
+
+        regime_starts = np.flatnonzero(mask.to_numpy())
+        regime_target = target.to_numpy()[regime_starts]
+
+        prev_target = np.empty_like(regime_target)
+        prev_target[0] = 0.0
+        prev_target[1:] = regime_target[:-1]
+
+        regime_length = np.diff(np.append(regime_starts, n))
+
+        # cap windows at bars remaining in the session to prevent regimes from spanning across the overnight gap
+        dates = df.index.floor("D")
+        eod_indices = np.append(np.flatnonzero(dates[:-1] != dates[1:]), n - 1)
+        last_minute = eod_indices[np.searchsorted(eod_indices, regime_starts, side="left")]
+
+        window = np.maximum(np.minimum(np.minimum(self.window, regime_length), last_minute - regime_starts + 1), 1)
+
+        df["position"] = _resolve_window_fill(regime_starts, window, prev_target, regime_target, volume)
+        cache["position"] = df["position"]
+
+        return df
