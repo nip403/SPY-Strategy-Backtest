@@ -440,6 +440,8 @@ class StrategyConnector(AnalysisReport):
         
         rows = {
             "Sharpe": fmt_vals(sample["sharpe"]),
+            "Expected Return": fmt_vals(sample["exp_ret"], pct=True),
+            "Volatility": fmt_vals(sample["vol"], pct=True),
             "Drag (Calm-Period Cost)": fmt_vals(sample["drag"], pct=True),
             "Max Drawdown": fmt_vals(sample["maxdd"], pct=True),
             "Max DD Days": fmt_vals(sample["dd_days"], suffix=" Days"),
