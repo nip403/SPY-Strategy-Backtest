@@ -69,10 +69,10 @@ def test_request_cache_hit_returns_cached_df_without_touching_alpaca(tmp_cwd, fa
     cached = pd.DataFrame({
         "open": [400.0], "high": [400.5], "low": [399.5], "close": [400.2], "volume": [1000.0],
     }, index=pd.DatetimeIndex(["2024-01-02 09:30:00"], tz="America/New_York"))
-    cached["time"] = cached.index.time
+    cached["time"] = (cached.index.hour * 60 + cached.index.minute).astype("int16")
     cached.to_parquet(cache_file)
 
-    with patch("backtest_engine.data.StockHistoricalDataClient") as MockClient:
+    with patch("alpaca.data.historical.stock.StockHistoricalDataClient") as MockClient:
         result = request(ticker="SPY", config=fake_alpaca_config, start=start, end=end, use_cache=True)
         MockClient.assert_not_called()
 
@@ -85,7 +85,7 @@ def test_request_cache_filename_encodes_ticker_and_date_range(tmp_cwd, fake_alpa
     cached = pd.DataFrame({"open": [1.0], "high": [1.0], "low": [1.0], "close": [1.0], "volume": [1.0]})
     cached.to_parquet(tmp_cwd / expected_name)
 
-    with patch("backtest_engine.data.StockHistoricalDataClient") as MockClient:
+    with patch("alpaca.data.historical.stock.StockHistoricalDataClient") as MockClient:
         request(ticker="QQQ", config=fake_alpaca_config, start=start, end=end, use_cache=True)
         MockClient.assert_not_called()
 
@@ -96,7 +96,7 @@ def test_request_live_fetch_calls_alpaca_with_correct_params_and_writes_cache(tm
     mock_bars = MagicMock()
     mock_bars.df = _make_raw_alpaca_df()
 
-    with patch("backtest_engine.data.StockHistoricalDataClient") as MockClient:
+    with patch("alpaca.data.historical.stock.StockHistoricalDataClient") as MockClient:
         instance = MockClient.return_value
         instance.get_stock_bars.return_value = mock_bars
 
@@ -121,7 +121,7 @@ def test_request_use_cache_false_always_fetches_even_if_cache_exists(tmp_cwd, fa
     mock_bars = MagicMock()
     mock_bars.df = _make_raw_alpaca_df()
 
-    with patch("backtest_engine.data.StockHistoricalDataClient") as MockClient:
+    with patch("alpaca.data.historical.stock.StockHistoricalDataClient") as MockClient:
         instance = MockClient.return_value
         instance.get_stock_bars.return_value = mock_bars
 

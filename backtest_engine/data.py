@@ -1,6 +1,3 @@
-from alpaca.data.historical.stock import StockHistoricalDataClient
-from alpaca.data.requests import StockBarsRequest
-from alpaca.data.timeframe import TimeFrame
 import pandas as pd
 from datetime import datetime
 import os
@@ -31,7 +28,12 @@ def request(*, ticker: str = "SPY", config: dict, start: datetime = datetime(201
     if use_cache and os.path.exists(cache_filename):
         print(f"Loading data from local cache: {cache_filename}")
         return pd.read_parquet(cache_filename)
-        
+
+    # module-level import deferred to cache misses only
+    from alpaca.data.historical.stock import StockHistoricalDataClient
+    from alpaca.data.requests import StockBarsRequest
+    from alpaca.data.timeframe import TimeFrame
+
     print("Cache not found. Fetching from Alpaca API...")
     client = StockHistoricalDataClient(
         api_key=config["key"], 
@@ -71,6 +73,7 @@ def _preprocess(alpaca_df: pd.DataFrame) -> pd.DataFrame:
     df = alpaca_df.tz_convert("America/New_York", level="timestamp").droplevel("symbol")
     df = df[df.index.dayofweek < 5].between_time("09:30", "15:59")[["open", "high", "low", "close", "volume"]].sort_index()
 
-    df["time"] = df.index.time
-    
+    # minutes since midnight instead of raw datetime.time - ~6x less memory and much faster for downstream groupby (datetime.time interface never used)
+    df["time"] = (df.index.hour * 60 + df.index.minute).astype("int16")
+
     return df.dropna()

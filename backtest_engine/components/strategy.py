@@ -28,7 +28,7 @@ def resolve_positions(signals: np.ndarray) -> np.ndarray:
     position = np.empty(len(signals))
     state = 0
 
-    for i, s in enumerate(signals):
+    for i, s in enumerate(signals.tolist()):
         le, se, lx, sx, eod = s
         
         if eod:

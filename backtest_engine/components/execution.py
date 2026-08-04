@@ -79,11 +79,12 @@ class CappedVolumeRolloverExecution(ExecutionComponent):
         target = rollover["target"].to_numpy()
         raw_capacity = rollover["raw_capacity"].to_numpy()
 
-        # dense 0-indexed regime ids (robust to any gaps in the underlying regime numbering)
-        _, regime = np.unique(rollover["regime"].to_numpy(), return_inverse=True)
+        # 0-indexed regime ids
+        raw_regime = rollover["regime"].to_numpy()
+        regime = np.cumsum(np.concatenate([[True], raw_regime[1:] != raw_regime[:-1]])) - 1
 
-        capacity = np.divide(raw_capacity[:, None], aum[None, :], out=np.zeros((len(raw_capacity), len(aum))), where=(aum[None, :] > 0))
-        cum_cap = pd.DataFrame(capacity).groupby(regime).cumsum().to_numpy() # cumulative capacity per regime
+        raw = pd.Series(raw_capacity).groupby(regime).cumsum().to_numpy()  # O(rows), one column
+        cum_cap = np.divide(raw[:, None], aum[None, :], out=np.zeros((len(raw_capacity), len(aum))), where=(aum[None, :] > 0)) # cumulative capacity per regime
 
         # regime-level summary for path-dependent starts/ends
         regime_target = pd.Series(target).groupby(regime).first().to_numpy() # (R,)
@@ -105,11 +106,7 @@ class CappedVolumeRolloverExecution(ExecutionComponent):
         target_col = target[:, None]
 
         # matching and clipping minute by minute
-        return np.where(
-            target_col > p_start_bar,
-            np.minimum(target_col, p_start_bar + cum_cap),
-            np.maximum(target_col, p_start_bar - cum_cap),
-        )
+        return p_start_bar + np.clip(target_col - p_start_bar, -cum_cap, cum_cap)
 
 class CappedVolumeExecution(ExecutionComponent):
     def __init__(self, *, participation_ceiling: float = 0.1) -> None:

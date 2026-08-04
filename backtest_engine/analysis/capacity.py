@@ -34,7 +34,6 @@ class CapacityEstimator(AnalysisReport):
         
         assert 0 <= decay_threshold < 1
         
-        self.portfolio = portfolio
         self.max_delay = max_delay
         self.decay_threshold = decay_threshold
 
@@ -152,7 +151,7 @@ class CapacityEstimator(AnalysisReport):
             f"Alpha Decay Window: {self.window:,} min(s) (decays to {self.decay_threshold:.0%} of immediate-entry return)",
             f"Peak Participation Rate: {self.participation_rate:.1%}",
             f"Avg. Volume / Min: {self.avg_volume_per_min:,.0f} shares",
-            f"Est. Capacity Bound: ${self.capacity_bound:,.0f}",
+            f"Est. Fill Capacity Bound: ${self.capacity_bound:,.0f}", # mechanical execution upper bound, not a true bind
             f"Sharpe @ Base: {self.sharpe_curve[0]:,.2f}",
             f"Sharpe @ Window <{self.window} min>: {self.sharpe_curve[self.window]:,.2f}",
         ]

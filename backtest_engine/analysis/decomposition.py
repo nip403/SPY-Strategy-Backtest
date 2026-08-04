@@ -27,10 +27,8 @@ class PortfolioDecomposer(AnalysisReport):
             End date of target backtest period.
         """
 
-        self.portfolio = portfolio
-        self.aum = self.portfolio.aum
-
-        df = self.portfolio.df.loc[str(start_date): str(end_date)]
+        self.aum = portfolio.aum
+        df = portfolio.df.loc[str(start_date): str(end_date)]
 
         # long/short split
         legs = self.split_long_short(*(col[:, None] for col in df[["position", "ret", "gross_ret", "net_ret"]].to_numpy().T))
@@ -60,20 +58,20 @@ class PortfolioDecomposer(AnalysisReport):
                 "trade_wins": trades["trade_wins"],
             })
 
-        append_bench = lambda leg_df: pd.concat([leg_df, self.portfolio.stats.loc[start_date: end_date, ["bench_ret", "bench_dd"]]], axis=1)
+        append_bench = lambda leg_df: pd.concat([leg_df, portfolio.stats.loc[start_date: end_date, ["bench_ret", "bench_dd"]]], axis=1)
 
         long_df = append_bench(build(net_ret["long"], positions["long"]))
         short_df = append_bench(build(net_ret["short"], positions["short"]))
 
         self.components: dict[str, Tearsheet] = {
-            "strategy": Tearsheet(self.portfolio.stats.loc[start_date: end_date]),
+            "strategy": Tearsheet(portfolio.stats.loc[start_date: end_date]),
             "long": Tearsheet(long_df),
             "short": Tearsheet(short_df),
         }
 
         self._plot_data = pd.concat(
             [
-                self.portfolio.stats.loc[start_date: end_date, ["strat_ret", "bench_ret"]],
+                portfolio.stats.loc[start_date: end_date, ["strat_ret", "bench_ret"]],
                 long_df["strat_ret"].rename("long"),
                 short_df["strat_ret"].rename("short"),
                 ],
@@ -225,10 +223,11 @@ class PortfolioDecomposer(AnalysisReport):
         ax_kde = fig2.add_subplot(gs[1, 1])
         global_xlim = ret["Strategy"].abs().std() * 4.5
 
+        xs = np.linspace(-global_xlim, global_xlim, 200)
+
         for col in ret.columns:
             kde = gaussian_kde(ret[col].values)
-            ys = kde(np.linspace(-global_xlim, global_xlim, 500))
-            ax_kde.plot(np.linspace(-global_xlim, global_xlim, 500), ys, label=col, color=colours[col], linewidth=1)
+            ax_kde.plot(xs, kde(xs), label=col, color=colours[col], linewidth=1)
 
         ax_kde.set_title("Overlayed (Continuous, Gaussian KDE)", fontsize=11, fontweight="bold")
         ax_kde.set_xlabel("Daily Return", fontsize=10)

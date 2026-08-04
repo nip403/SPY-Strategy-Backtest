@@ -97,7 +97,7 @@ def synthetic_ohlcv(random_seed):
         volume = rng.uniform(avg_volume / 390 * 0.5, avg_volume / 390 * 1.5, size=n)
 
         df = pd.DataFrame({"open": open_, "high": high, "low": low, "close": close, "volume": volume}, index=index)
-        df["time"] = df.index.time
+        df["time"] = (df.index.hour * 60 + df.index.minute).astype("int16")  # mirrors data.py._preprocess's encoding
 
         return df
 

@@ -163,7 +163,7 @@ def test_plot_savepath_saves_and_closes_figure(estimator, captured_figures, tmp_
 def test_str_contains_expected_labels(estimator):
     text = str(estimator)
 
-    for label in ["Alpha Decay Window", "Participation Rate", "Avg. Volume / Min", "Est. Capacity Bound", "Sharpe @ Base", "Sharpe @ Window"]:
+    for label in ["Alpha Decay Window", "Participation Rate", "Avg. Volume / Min", "Est. Fill Capacity Bound", "Sharpe @ Base", "Sharpe @ Window"]:
         assert label in text
 
 def test_report_plots_and_prints(estimator, captured_figures):
@@ -175,4 +175,4 @@ def test_report_plots_and_prints(estimator, captured_figures):
 
     assert len(captured_figures) == 1
     assert len(plt.get_fignums()) == figs_before
-    assert "Est. Capacity Bound" in buf.getvalue()
+    assert "Est. Fill Capacity Bound" in buf.getvalue()

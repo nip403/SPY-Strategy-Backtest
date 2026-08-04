@@ -112,11 +112,11 @@ class Portfolio:
         df["deviation"] = ((df["close"] / df["daily_open"]) - 1).abs() # "move"
         df["sigma"] = df.groupby("time")["deviation"].transform(lambda x: x.shift(1).rolling(14, min_periods=14).mean())
 
-        df["upper_bound"] = df[["daily_open", "prev_close"]].max(axis=1) * (1 + df["sigma"])
-        df["lower_bound"] = df[["daily_open", "prev_close"]].min(axis=1) * (1 - df["sigma"])
+        df["upper_bound"] = np.maximum(df["daily_open"], df["prev_close"]) * (1 + df["sigma"])
+        df["lower_bound"] = np.minimum(df["daily_open"], df["prev_close"]) * (1 - df["sigma"])
 
-        df["long_stop"] = df[["upper_bound", "vwap"]].max(axis=1)
-        df["short_stop"] = df[["lower_bound", "vwap"]].min(axis=1)
+        df["long_stop"] = np.maximum(df["upper_bound"], df["vwap"])
+        df["short_stop"] = np.minimum(df["lower_bound"], df["vwap"])
 
         return df
 
@@ -228,8 +228,8 @@ class Portfolio:
         instance = cls(df=df, aum=base_aum if base_aum is not None and min_aum <= base_aum <= max_aum else min_aum, **kwargs)
         matrix = instance.returns_matrix(np.array(aum))
 
-        means = np.nanmean(matrix, axis=0)
-        stds = np.nanstd(matrix, axis=0)
+        means = np.mean(matrix, axis=0)
+        stds = np.std(matrix, axis=0)
         sharpes = np.where(stds != 0, (means / stds) * np.sqrt(252 * 390), 0) # annualise from minutes
 
         fmt_aum = lambda x: f"{x:.1e}".replace("e+", "e") if np.isfinite(x) else "N/A"
