@@ -588,7 +588,7 @@ class StrategyConnector(AnalysisReport):
         # tradeoff: sharpe / E[R] / vol / drag
         fig2, axes2 = plt.subplots(nrows=4, ncols=1, figsize=(14, 12), sharex=True)
 
-        axes2[0].plot(self.tradeoff_series.index, self.tradeoff_series["sharpe"], linewidth=1, color="yellow")
+        axes2[0].plot(self.tradeoff_series.index, self.tradeoff_series["sharpe"], linewidth=1, color="orange")
         axes2[0].set_title("Sharpe vs. Strategy Weight", loc="left", fontweight="bold")
         axes2[0].set_ylabel("Sharpe Ratio")
 
