@@ -370,10 +370,11 @@ class StrategyConnector(AnalysisReport):
         crash.index = crash.index.date # strip tz-aware stamps + dt
         crash = crash.reindex(self.daily.index, fill_value=False).to_numpy()
 
-        # guarantee 10% intervals for reporting - rounded before dedup since linspace(0,1,101)[30]
+        # guarantee 10% intervals plus sharpe-optimised weight
         weights = np.unique(np.round(np.r_[
             np.linspace(0, 1, round(1 / self.weight_intervals) + 1),
             np.linspace(0, 1, 11),
+            [self._opt_w],
         ], 4))
 
         long_daily, short_daily = self._approx_aum_leg_returns(portfolio, weights)
@@ -429,15 +430,16 @@ class StrategyConnector(AnalysisReport):
     def _format_tradeoff_table(self) -> str:
         """
         Format self.tradeoff_series as a standalone table.
-        Only shows 10% weight increments for readability.
-        
+        Only shows 10% weight increments plus Sharpe-optimised weight (in sorted order).
         Returns str
             Formatted table.
         """
 
-        sample = self.tradeoff_series.loc[np.round(np.linspace(0, 1, 11), 4)]
+        opt_w = round(float(self._opt_w), 4)
+        sample_weights = np.unique(np.r_[np.round(np.linspace(0, 1, 11), 4), opt_w])
+        sample = self.tradeoff_series.loc[sample_weights]
         fmt_vals = lambda arr, **kwargs: [format_value(i, **kwargs) for i in arr]
-        
+
         rows = {
             "Sharpe": fmt_vals(sample["sharpe"]),
             "Expected Return": fmt_vals(sample["exp_ret"], pct=True),
@@ -451,7 +453,8 @@ class StrategyConnector(AnalysisReport):
             "CVaR Relief / Drag": fmt_vals(sample["cvar_relief_per_drag"], suffix="x"),
         }
 
-        cols = pd.Index([f"{w:.0%}" for w in sample.index], name="Strategy Weight")
+        col_labels = [f"{w:.0%}" + ("*" if np.isclose(w, opt_w) else "") for w in sample_weights]
+        cols = pd.Index(col_labels, name="Strategy Weight")
 
         return pd.DataFrame(rows, index=cols).T.to_string()
 
