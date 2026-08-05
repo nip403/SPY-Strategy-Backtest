@@ -17,11 +17,13 @@ from .utils import generate_toy_returns, generate_toy_equity
 from .data import request
 
 __all__ = [
+    # utils
     "request",
 
     "generate_toy_returns",
     "generate_toy_equity",
 
+    # analysis layer
     "AnalysisReport",
     "SeriesMetrics",
     "TradeMetrics",
@@ -34,8 +36,10 @@ __all__ = [
     "StrategyConnector",
     "CapacityEstimator",
 
+    # core
     "Portfolio",
 
+    # components
     "BacktestContext",
     "StrategyComponent",
     "ExecutionComponent",

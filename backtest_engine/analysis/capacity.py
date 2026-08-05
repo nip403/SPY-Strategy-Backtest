@@ -217,6 +217,7 @@ class CapacityEstimator(AnalysisReport):
 
         resolution : int = 100
             Number of log-spaced AUM points swept between $10k and 2x the fill capacity bound.
+            Currently no functionality to enable configuration.
 
         Returns tuple[np.ndarray]
             (aum_grid, mean net return per AUM).
