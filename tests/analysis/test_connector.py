@@ -306,6 +306,32 @@ def test_format_tradeoff_table_decimates_to_ten_percent_steps(connector):
     assert "DD Relief / Drag" in text
     assert "CVaR Relief / Drag" in text
 
+def test_tradeoff_profile_includes_optimised_weight_point(connector):
+    # _format_tradeoff_table does an exact .loc[] lookup on self._opt_w, so _tradeoff_profile must
+    # guarantee that exact point exists in the sweep alongside the 10%-step guarantee points
+    assert np.any(np.isclose(connector.tradeoff_series.index.to_numpy(), connector._opt_w, atol=1e-4))
+
+def test_format_tradeoff_table_places_optimum_between_bracketing_steps(connector, monkeypatch):
+    # pins the user-facing example: a 36% optimum should be inserted strictly between the 30% and
+    # 40% columns, not just tacked onto the end - default weight_intervals=0.01 guarantees 0.36
+    # already sits on the tradeoff_series grid so the .loc[] lookup in _format_tradeoff_table succeeds
+    monkeypatch.setattr(connector, "_opt_w", 0.36)
+    text = connector._format_tradeoff_table()
+    header_line = text.splitlines()[0]
+
+    assert "36% (Optimal)" in header_line
+    assert header_line.index("30%") < header_line.index("36% (Optimal)") < header_line.index("40%")
+
+def test_format_tradeoff_table_optimum_on_existing_step_is_not_duplicated(connector, monkeypatch):
+    # when the optimum lands exactly on a 10%-step (e.g. 40%), it should be tagged in place rather
+    # than producing a second, duplicate 40% column
+    monkeypatch.setattr(connector, "_opt_w", 0.4)
+    text = connector._format_tradeoff_table()
+    header_line = text.splitlines()[0]
+
+    assert header_line.count("40%") == 1
+    assert "40% (Optimal)" in header_line
+
 # ---- plot / str / report ------------------------------------------------
 
 def test_plot_shows_and_closes_figure(connector, captured_figures):
