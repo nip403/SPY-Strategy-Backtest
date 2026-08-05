@@ -358,7 +358,7 @@ class StrategyConnector(AnalysisReport):
 
         Returns pd.DataFrame
             Columns (sharpe, exp_ret, vol, drag, maxdd, dd_days, recovery, cvar, dd_relief_per_drag, cvar_relief_per_drag)
-             = Sharpe, Annualised Expected Return, Annualised Volatility, Drag (calm-period cost), Max Drawdown, Max DD Days, DD Recovery Days, 95% CVaR, (Max DD change vs. book) / Drag, (CVaR change vs. book) / Drag.
+             = Sharpe, Annualised Expected Return (Geometric), Annualised Volatility, Drag (calm-period cost), Max Drawdown, Max DD Days, DD Recovery Days, 95% CVaR, (Max DD change vs. book) / Drag, (CVaR change vs. book) / Drag.
         """
 
         # crash detection
@@ -415,7 +415,7 @@ class StrategyConnector(AnalysisReport):
         
         return pd.DataFrame({
             "sharpe": np.where(std != 0, (ret / std) * np.sqrt(252), 0),
-            "exp_ret": ret * 252,
+            "exp_ret": equity[-1, :] ** (252 / n_days) - 1,  # geometric, match metrics.py
             "vol": std * np.sqrt(252),
             "drag": drag,
             "maxdd": maxdd,
@@ -447,8 +447,8 @@ class StrategyConnector(AnalysisReport):
             "Max DD Days": fmt_vals(sample["dd_days"], suffix=" Days"),
             "DD Recovery Days": fmt_vals(sample["recovery"], suffix=" Days"),
             "95% CVaR": fmt_vals(sample["cvar"], pct=True),
-            "DD Relief / Drag": fmt_vals(sample["dd_relief_per_drag"], suffix=" x"),
-            "CVaR Relief / Drag": fmt_vals(sample["cvar_relief_per_drag"], suffix=" x"),
+            "DD Relief / Drag": fmt_vals(sample["dd_relief_per_drag"], suffix="x"),
+            "CVaR Relief / Drag": fmt_vals(sample["cvar_relief_per_drag"], suffix="x"),
         }
 
         cols = pd.Index([f"{w:.0%}" for w in sample.index], name="Strategy Weight")
@@ -588,7 +588,7 @@ class StrategyConnector(AnalysisReport):
         # tradeoff: sharpe / E[R] / vol / drag
         fig2, axes2 = plt.subplots(nrows=4, ncols=1, figsize=(14, 12), sharex=True)
 
-        axes2[0].plot(self.tradeoff_series.index, self.tradeoff_series["sharpe"], linewidth=1)
+        axes2[0].plot(self.tradeoff_series.index, self.tradeoff_series["sharpe"], linewidth=1, color="yellow")
         axes2[0].set_title("Sharpe vs. Strategy Weight", loc="left", fontweight="bold")
         axes2[0].set_ylabel("Sharpe Ratio")
 
@@ -597,12 +597,12 @@ class StrategyConnector(AnalysisReport):
         axes2[1].set_ylabel("E[R] (Ann.)")
         axes2[1].yaxis.set_major_formatter(PercentFormatter(1, decimals=0))
 
-        axes2[2].plot(self.tradeoff_series.index, self.tradeoff_series["vol"], linewidth=1)
+        axes2[2].plot(self.tradeoff_series.index, self.tradeoff_series["vol"], linewidth=1, color="red")
         axes2[2].set_title("Volatility vs. Strategy Weight", loc="left", fontweight="bold")
         axes2[2].set_ylabel("Vol (Ann.)")
         axes2[2].yaxis.set_major_formatter(PercentFormatter(1, decimals=0))
 
-        axes2[3].plot(self.tradeoff_series.index, self.tradeoff_series["drag"], linewidth=1)
+        axes2[3].plot(self.tradeoff_series.index, self.tradeoff_series["drag"], linewidth=1, color="purple")
         axes2[3].set_title("Calm-Period Drag vs. Strategy Weight", loc="left", fontweight="bold")
         axes2[3].set_ylabel("Drag (Ann.)")
         axes2[3].yaxis.set_major_formatter(PercentFormatter(1, decimals=0))
@@ -622,7 +622,7 @@ class StrategyConnector(AnalysisReport):
         # tradeoff: max drawdown / dd days / recovery days / 95% cvar
         fig3, axes3 = plt.subplots(nrows=4, ncols=1, figsize=(14, 12), sharex=True)
 
-        axes3[0].plot(self.tradeoff_series.index, self.tradeoff_series["maxdd"], linewidth=1)
+        axes3[0].plot(self.tradeoff_series.index, self.tradeoff_series["maxdd"], linewidth=1, color="red")
         axes3[0].set_title("Max Drawdown vs. Strategy Weight", loc="left", fontweight="bold")
         axes3[0].set_ylabel("Max Drawdown")
         axes3[0].yaxis.set_major_formatter(PercentFormatter(1, decimals=0))
@@ -631,11 +631,11 @@ class StrategyConnector(AnalysisReport):
         axes3[1].set_title("Max Drawdown Days vs. Strategy Weight", loc="left", fontweight="bold")
         axes3[1].set_ylabel("Days")
 
-        axes3[2].plot(self.tradeoff_series.index, self.tradeoff_series["recovery"], linewidth=1)
+        axes3[2].plot(self.tradeoff_series.index, self.tradeoff_series["recovery"], linewidth=1, color="green")
         axes3[2].set_title("Drawdown Recovery Days vs. Strategy Weight", loc="left", fontweight="bold")
         axes3[2].set_ylabel("Days")
 
-        axes3[3].plot(self.tradeoff_series.index, self.tradeoff_series["cvar"], linewidth=1)
+        axes3[3].plot(self.tradeoff_series.index, self.tradeoff_series["cvar"], linewidth=1, color="orange")
         axes3[3].set_title("95% CVaR vs. Strategy Weight", loc="left", fontweight="bold")
         axes3[3].set_ylabel("CVaR")
         axes3[3].yaxis.set_major_formatter(PercentFormatter(1, decimals=1))

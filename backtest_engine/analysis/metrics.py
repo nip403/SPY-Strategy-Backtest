@@ -112,7 +112,7 @@ def compute_series_metrics(returns: pd.Series, drawdown: pd.Series) -> SeriesMet
 
     days = len(returns)
     cum_return = float((1 + returns).prod() - 1)
-    ann_return = (1 + cum_return) ** (252 / days) - 1 if days else float("nan")  # geometric
+    ann_return = (1 + cum_return) ** (252 / days) - 1  # geometric
     avg_daily_return = float(returns.mean())
     ann_vol = float(returns.std()) * np.sqrt(252)
     max_dd = float(drawdown.min())
@@ -211,8 +211,8 @@ def compute_relative_metrics(returns: pd.Series, reference: pd.Series) -> Relati
 
     up_mask = reference > 0
     down_mask = reference < 0
-    up_market_capture = _safe_div(returns[up_mask].mean(), reference[up_mask].mean()) if up_mask.any() else float("nan")
-    down_market_capture = _safe_div(returns[down_mask].mean(), reference[down_mask].mean()) if down_mask.any() else float("nan")
+    up_market_capture = _safe_div(returns[up_mask].mean(), reference[up_mask].mean())
+    down_market_capture = _safe_div(returns[down_mask].mean(), reference[down_mask].mean())
 
     ref_lower_q, ref_upper_q = reference.quantile([0.10, 0.90])
     ret_lower_q, ret_upper_q = returns.quantile([0.10, 0.90])
