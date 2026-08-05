@@ -35,19 +35,8 @@ def test_utility_functions_exported():
     for name in ["request", "generate_toy_returns", "generate_toy_equity"]:
         assert name in backtest_engine.__all__
 
-# ---- known asymmetry: NaiveExecution is importable but not re-exported --------
+# ---- execution implementations exported ------------------------------------
 
-def test_naive_execution_importable_but_deliberately_not_in_all():
-    """NOTE: characterizes current behaviour, not asserting it's ideal. NaiveExecution is
-    imported into backtest_engine/__init__.py (so `backtest_engine.NaiveExecution` works)
-    but is omitted from __all__, unlike its sibling CappedVolumeExecution/
-    CappedVolumeRolloverExecution, which are both imported *and* exported. This means
-    `from backtest_engine import *` will not pull in NaiveExecution even though it's the
-    default ExecutionComponent used by Portfolio."""
-
-    assert hasattr(backtest_engine, "NaiveExecution")
-    assert "NaiveExecution" not in backtest_engine.__all__
-
-def test_capped_volume_executions_exported_unlike_naive():
-    for name in ["CappedVolumeExecution", "CappedVolumeRolloverExecution"]:
+def test_execution_implementations_exported():
+    for name in ["NaiveExecution", "CappedVolumeExecution", "CappedVolumeRolloverExecution"]:
         assert name in backtest_engine.__all__

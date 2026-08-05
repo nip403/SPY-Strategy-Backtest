@@ -182,7 +182,7 @@ def test_cvar_monte_carlo_seeded_reproducible_across_runs(portfolio_factory, ran
 def test_tradeoff_profile_columns_and_index_bounds(connector):
     tp = connector.tradeoff_series
 
-    assert list(tp.columns) == ["sharpe", "drag", "maxdd", "dd_days", "recovery", "cvar", "dd_relief_per_drag", "cvar_relief_per_drag"]
+    assert list(tp.columns) == ["sharpe", "exp_ret", "vol", "drag", "maxdd", "dd_days", "recovery", "cvar", "dd_relief_per_drag", "cvar_relief_per_drag"]
     assert tp.index[0] == pytest.approx(0.0)
     assert tp.index[-1] == pytest.approx(1.0)
     # >=, not ==: the sweep also unions in the 10% guarantee points _format_tradeoff_table relies on
@@ -209,16 +209,17 @@ def test_format_tradeoff_table_works_with_coarse_weight_intervals(portfolio_fact
     for pct in ["0%", "10%", "50%", "100%"]:
         assert pct in text
 
-def test_exact_block_leg_returns_batched_matches_individual_calls(connector):
+def test_exact_block_leg_returns_batched_matches_individual_calls(connector, portfolio_factory):
     # _exact_block_leg_returns batches every weight scenario into one flattened (block, weight)
     # capacity-cost lookup rather than looping weight-by-weight (kept general even though current
     # callers only ever pass a single final weight) - this pins that the reshape/pick indexing
     # recovers each weight's own column correctly under batching
+    portfolio = portfolio_factory(n_days=25)
     weights = np.array([0.2, 0.5, 0.9])
-    batched_long, batched_short = connector._exact_block_leg_returns(weights)
+    batched_long, batched_short = connector._exact_block_leg_returns(portfolio, weights)
 
     for i, w in enumerate(weights):
-        single_long, single_short = connector._exact_block_leg_returns(np.array([w]))
+        single_long, single_short = connector._exact_block_leg_returns(portfolio, np.array([w]))
         np.testing.assert_allclose(batched_long[:, i], single_long[:, 0])
         np.testing.assert_allclose(batched_short[:, i], single_short[:, 0])
 
@@ -264,14 +265,15 @@ def test_tradeoff_profile_crash_mask_finds_days_with_enough_history(portfolio_fa
 
     assert crash.sum() > 0
 
-def test_tradeoff_profile_cvar_is_mean_of_own_worst_five_percent(connector):
+def test_tradeoff_profile_cvar_is_mean_of_own_worst_five_percent(connector, portfolio_factory):
     # cvar must be conditioned on each scenario's OWN return distribution (95% VaR threshold), not
     # on the exogenous benchmark crash mask used for drag - cross-check via an independent, unvectorized
     # per-column computation against the vectorized np.where/nanmean implementation
+    portfolio = portfolio_factory(n_days=25)
     tp = connector.tradeoff_series
     weights = tp.index.to_numpy()
 
-    long_daily, short_daily = connector._approx_aum_leg_returns(weights)
+    long_daily, short_daily = connector._approx_aum_leg_returns(portfolio, weights)
     returns_matrix = connector._mix_returns(weights, long_daily, short_daily)
     var_95 = np.quantile(returns_matrix, 0.05, axis=0)
 
