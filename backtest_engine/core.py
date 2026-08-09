@@ -236,18 +236,20 @@ class Portfolio:
         stds = np.std(matrix, axis=0)
         sharpes = np.where(stds != 0, (means / stds) * np.sqrt(252 * 390), 0) # annualise from minutes
 
-        fmt_aum = lambda x: f"{x:.1e}".replace("e+", "e") if np.isfinite(x) else "N/A"
+        fmt_aum = lambda x: f"{x:.1e}".replace("e+", "e")
 
         # calculate crossing AUM for Sharpe = 1
         roots = InterpolatedUnivariateSpline(np.log10(aum), sharpes - 1, k=3).roots()
-        cross = 10 ** roots[0] if len(roots) > 0 else float("nan")
 
         fig, ax = plt.subplots(figsize=(12, 8))
 
         x_idx = np.arange(len(aum))
         ax.plot(x_idx, sharpes, color="blue", label="Sharpe")
-        ax.axhline(1, color="gray", linestyle="--", linewidth=1, label=f"Base (AUM={fmt_aum(cross)})")
-        ax.axhline(0, color="black", linestyle="-", linewidth=1, label="Risk Free")
+
+        if len(roots):
+            ax.axhline(1, color="gray", linestyle="--", linewidth=1, label=f"1-Sharpe (AUM={fmt_aum(10 ** roots[0])})")
+
+        ax.axhline(0, color="black", linestyle="--", linewidth=1, label="Risk Free")
 
         ax.set_xlim(0, len(aum) - 1)
         ax.set_xlabel("AUM ($, Piecewise-Linear-Scaled)")

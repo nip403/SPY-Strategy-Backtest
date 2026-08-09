@@ -304,16 +304,21 @@ class CapacityEstimator(AnalysisReport):
 
         keep = self.economic_curve >= -2 * abs(self.economic_curve[0])
 
-        ax3.plot(self.economic_aum_grid[keep], self.economic_curve[keep], linewidth=1, label="Mean Net Return")
+        pct_curve = self.economic_curve[keep] * 100
+        max_abs = np.max(np.abs(pct_curve))
+        exp = int(np.floor(np.log10(max_abs))) if max_abs > 0 else 0
+
+        ax3.plot(self.economic_aum_grid[keep], pct_curve / 10 ** exp, linewidth=1, label="Mean Net Return")
 
         if np.isfinite(self.economic_capacity):
             ax3.axvline(self.economic_capacity, color="red", linestyle=":", linewidth=1, label=f"Economic Capacity (${self.economic_capacity:,.0f})")
+            ax3.axhline(0, color="gray", linestyle="--", linewidth=1)
 
         ax3.set_xscale("log")
         ax3.xaxis.set_minor_locator(NullLocator())
         ax3.set_title("Mean Net Return vs. Strategy Size", fontsize=12, fontweight="bold")
         ax3.set_xlabel("AUM ($, log scale)", fontsize=10)
-        ax3.set_ylabel("Mean Net Return (per bar)", fontsize=10)
+        ax3.set_ylabel(f"Mean Net Return (per bar, x1e{exp}%)", fontsize=10)
         ax3.margins(x=0)
         ax3.legend(loc="upper right", fontsize=9)
 

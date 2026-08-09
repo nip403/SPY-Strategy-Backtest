@@ -44,7 +44,6 @@ py -3.12 -m pytest --cov=backtest_engine --cov-report=term-missing -ra  # covera
 
 ### Todo
 
-- fix optimiser from MVO
-- optimise pd -> np/numba
+- end to end recommendation engine (book, bench, portfolio -> rec)
 - out of sample testing
 - logging, maybe

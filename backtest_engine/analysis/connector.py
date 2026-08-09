@@ -83,6 +83,11 @@ class StrategyConnector(AnalysisReport):
         self.daily = ((1 + self.df).resample("D").prod() - 1).loc[valid_days]
         self.daily.index = self.daily.index.date
 
+        # cache datetime groupby operations
+        day_key = strategy_portfolio.df.index.floor("D").to_numpy() 
+        self._day_starts = np.flatnonzero(np.concatenate([[True], day_key[1:] != day_key[:-1]]))
+        self._day_select = np.searchsorted(day_key[self._day_starts], valid_days.to_numpy())
+
         # populated by _exact_leg_returns on first call: None = not yet probed, False = AUM-sensitive (e.g. DynamicCostModel), else the cached (n_days, 1) AUM-invariant result
         self._cached_legs = None
 
@@ -124,7 +129,7 @@ class StrategyConnector(AnalysisReport):
             Increases the search precision by one decimal place when using points = 11.
         points : int = 11
             Number of candidate weights tested per refinement round.
-            Default points = 11 tests weights in 10% increments (0.0, 0.1, ..., 1.0) before refining the interval.
+            Default points = 11 tests weights in 10% increments (0, 0.1, ..., 1) before refining the interval.
 
         Returns tuple[float, pd.Series]
             Optimised strategy weight and resulting mixed portfolio daily returns.
@@ -265,10 +270,9 @@ class StrategyConnector(AnalysisReport):
         legs = PortfolioDecomposer.split_long_short(position_matrix, ret, gross_matrix, net_matrix)
 
         def to_daily(net_ret_matrix: np.ndarray) -> np.ndarray:
-            daily = pd.DataFrame(1 + net_ret_matrix, index=portfolio.df.index).resample("D").prod() - 1
-            daily.index = daily.index.date
+            daily = np.multiply.reduceat(1 + net_ret_matrix, self._day_starts, axis=0)
 
-            return daily.loc[self.daily.index].values
+            return daily[self._day_select] - 1
 
         return to_daily(legs["long"]["net_ret"]), to_daily(legs["short"]["net_ret"])
 

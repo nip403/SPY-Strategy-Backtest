@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 from typing import Optional
 from .base import BacktestContext, CostComponent
+from .numba_kernel import _resolve_dynamic_impact
 
 def _abs_delta_position(position_matrix: np.ndarray) -> np.ndarray:
     """
@@ -237,29 +238,21 @@ class DynamicCostModel(CostComponent):
         Returns np.ndarray
             Matrix of net returns with rows matching timestamps and columns matching AUM values.
         """
-
-        aum = np.asarray(aum, dtype=float)[None, :]
-
-        delta_leverage = _abs_delta_position(position_matrix)
-
-        close = cache["close"].to_numpy()[:, None]
-        volume = cache["volume"].to_numpy()[:, None]
+        
         dynamic_cost = cache["dynamic_cost"]
-        adv = dynamic_cost["adv"].to_numpy()[:, None]
-        ann_vol = dynamic_cost["ann_vol"].to_numpy()[:, None]
 
-        # common factors, failsafe set div by volume=0 scenarios to 0
-        denom_adv = close * adv
-        adv_term = np.divide(delta_leverage, denom_adv, out=np.zeros_like(delta_leverage), where=(denom_adv != 0))
-
-        denom_vol = close * volume
-        participation = np.divide(delta_leverage, denom_vol, out=np.zeros_like(delta_leverage), where=(denom_vol != 0))
-
-        perm = self.a1 * (adv_term ** self.a2) * (ann_vol ** self.a3) * delta_leverage
-        temp = perm * (participation ** self.a4)
-
-        commission = np.divide(self.commission * delta_leverage, close, out=np.zeros_like(delta_leverage), where=(close != 0))
-
-        mkt = (self.b1 * temp * (aum ** (self.a2 + self.a4)) + (1 - self.b1) * perm * (aum ** self.a2)) / 10_000
-
-        return gross_matrix - mkt - commission
+        return _resolve_dynamic_impact(
+            _abs_delta_position(position_matrix),
+            cache["close"].to_numpy(),
+            cache["volume"].to_numpy(),
+            dynamic_cost["adv"].to_numpy(),
+            dynamic_cost["ann_vol"].to_numpy(),
+            np.asarray(aum, dtype=float),
+            gross_matrix,
+            self.a1,
+            self.a2,
+            self.a3,
+            self.a4,
+            self.b1,
+            self.commission,
+        )

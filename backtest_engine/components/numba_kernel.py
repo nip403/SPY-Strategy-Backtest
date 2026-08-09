@@ -1,6 +1,8 @@
 import numpy as np
 import numba
 
+# prefer contiguous array inputs (& non-broadcasts)
+
 @numba.njit(cache=True)
 def _resolve_regime_starts(regime_target: np.ndarray, regime_maxcap: np.ndarray) -> np.ndarray:
     """
@@ -69,6 +71,112 @@ def _resolve_ioc_fills(targets: np.ndarray, caps: np.ndarray) -> np.ndarray:
             fills[i, j] = p_current[j]
 
     return fills
+
+@numba.njit(cache=True, parallel=True)
+def _resolve_dynamic_impact(delta_leverage: np.ndarray, close: np.ndarray, volume: np.ndarray, adv: np.ndarray, ann_vol: np.ndarray, aum: np.ndarray, gross: np.ndarray, a1: float, a2: float, a3: float, a4: float, b1: float, commission: float) -> np.ndarray:
+    """
+    Numba core of DynamicCostModel.returns_matrix Kissel I-Star pricing.
+    
+    delta_leverage : np.ndarray
+        abs(delta-position), shape (bars, aum_scenarios).
+    close, volume, adv, ann_vol : np.ndarray
+        Per-bar market/cost inputs, shape (bars,).
+    aum : np.ndarray
+        AUM scenarios, shape (aum_scenarios,).
+    gross : np.ndarray
+        Gross returns, shape (bars, aum_scenarios).
+    a1, a2, a3, a4, b1, commission : float
+        DynamicCostModel coefficients (see DynamicCostModel.returns_matrix docstring for the derivation).
+
+    Returns np.ndarray
+        Net returns, shape (bars, aum_scenarios).
+    """
+
+    n, k = delta_leverage.shape
+    out = np.empty((n, k))
+
+    for i in numba.prange(n):
+        c = close[i]
+        v = volume[i]
+        a = adv[i]
+        sigma = ann_vol[i]
+
+        denom_adv = c * a
+        denom_vol = c * v
+
+        for j in range(k):
+            dl = delta_leverage[i, j]
+
+            adv_term = dl / denom_adv if denom_adv else 0
+            participation = dl / denom_vol if denom_vol else 0
+
+            perm = a1 * (adv_term ** a2) * (sigma ** a3) * dl
+            temp = perm * (participation ** a4)
+            comm = (commission * dl / c) if c else 0
+
+            au = aum[j]
+            mkt = (b1 * temp * (au ** (a2 + a4)) + (1 - b1) * perm * (au ** a2)) / 10_000
+
+            out[i, j] = gross[i, j] - mkt - comm
+
+    return out
+
+@numba.njit(cache=True, parallel=True)
+def _resolve_split_long_short(position: np.ndarray, ret: np.ndarray, gross: np.ndarray, net: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Numba core of PortfolioDecomposer.split_long_short.
+    Performs the long/short clip and gross/turnover/proportional cost split.
+    Two passes turn out to be faster than one.
+    
+    position, ret, gross, net : np.ndarray
+        (bars, scenarios) arrays. ret may be (bars, 1) to broadcast across scenarios.
+
+    Returns tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+        (pos_long, pos_short, long_net_ret, short_net_ret), shapes (bars, scenarios).
+    """
+
+    n, k = position.shape
+    pos_long = np.empty((n, k))
+    pos_short = np.empty((n, k))
+
+    for i in numba.prange(n):
+        for j in range(k):
+            p = position[i, j]
+            pos_long[i, j] = p if p > 0 else 0
+            pos_short[i, j] = p if p < 0 else 0
+
+    long_ret = np.zeros((n, k))
+    short_ret = np.zeros((n, k))
+    ret_broadcast = ret.shape[1] == 1
+
+    for i in numba.prange(1, n):
+        for j in range(k):
+            prev_long = pos_long[i - 1, j]
+            prev_short = pos_short[i - 1, j]
+            pl = pos_long[i, j]
+            ps = pos_short[i, j]
+
+            r = ret[i, 0] if ret_broadcast else ret[i, j]
+
+            gross_long = prev_long * r
+            gross_short = prev_short * r
+
+            delta_long = abs(pl - prev_long)
+            delta_short = abs(ps - prev_short)
+            total_delta = delta_long + delta_short
+            cost = gross[i, j] - net[i, j]
+
+            if total_delta:
+                cost_long = (delta_long / total_delta) * cost
+                cost_short = (delta_short / total_delta) * cost
+            else:
+                cost_long = 0
+                cost_short = 0
+
+            long_ret[i, j] = gross_long - cost_long
+            short_ret[i, j] = gross_short - cost_short
+
+    return pos_long, pos_short, long_ret, short_ret
 
 ##### LEGACY #####
 

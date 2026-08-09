@@ -12,6 +12,7 @@ from .base import AnalysisReport
 from .tearsheet import Tearsheet
 from .metrics import SeriesMetrics, TradeMetrics, RelativeMetrics, dataclass_rows, merge_groups, render_sections
 from ..utils import trade_stats, compute_drawdown, save_figures
+from ..components.numba_kernel import _resolve_split_long_short
 
 class PortfolioDecomposer(AnalysisReport):
     def __init__(self, portfolio: Portfolio, start_date: date, end_date: date) -> None:
@@ -100,23 +101,16 @@ class PortfolioDecomposer(AnalysisReport):
             {"long": {"position": ..., "net_ret": ...}, "short": {...}}, each (n_bars, n_scenarios).
         """
 
-        pos_long, pos_short = np.clip(position, 0, None), np.clip(position, None, 0)
-
-        gross_long = np.vstack([np.zeros((1, pos_long.shape[1])), pos_long[:-1]]) * ret
-        gross_short = np.vstack([np.zeros((1, pos_short.shape[1])), pos_short[:-1]]) * ret
-
-        delta_long = np.abs(np.diff(pos_long, axis=0, prepend=pos_long[:1]))
-        delta_short = np.abs(np.diff(pos_short, axis=0, prepend=pos_short[:1]))
-        
-        total_delta = delta_long + delta_short
-        cost = gross - net
-        
-        cost_long = np.divide(delta_long, total_delta, out=np.zeros_like(cost), where=(total_delta != 0)) * cost
-        cost_short = np.divide(delta_short, total_delta, out=np.zeros_like(cost), where=(total_delta != 0)) * cost
+        pos_long, pos_short, long_net_ret, short_net_ret = _resolve_split_long_short(
+            np.ascontiguousarray(position), 
+            ret, 
+            np.ascontiguousarray(gross), 
+            np.ascontiguousarray(net),
+        )
 
         return {
-            "long": {"position": pos_long, "net_ret": gross_long - cost_long},
-            "short": {"position": pos_short, "net_ret": gross_short - cost_short},
+            "long": {"position": pos_long, "net_ret": long_net_ret},
+            "short": {"position": pos_short, "net_ret": short_net_ret},
         }
 
     def plot(self, *, savepath: Optional[str | Path] = None) -> None:

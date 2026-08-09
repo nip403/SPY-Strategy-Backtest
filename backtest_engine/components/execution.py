@@ -84,14 +84,18 @@ class CappedVolumeRolloverExecution(ExecutionComponent):
 
         # 0-indexed regime ids
         raw_regime = rollover["regime"].to_numpy()
-        regime = np.cumsum(np.concatenate([[True], raw_regime[1:] != raw_regime[:-1]])) - 1
+        regime_change = np.concatenate([[True], raw_regime[1:] != raw_regime[:-1]])
+        regime = np.cumsum(regime_change) - 1
 
         raw = pd.Series(raw_capacity).groupby(regime).cumsum().to_numpy()  # O(rows), one column
         cum_cap = np.divide(raw[:, None], aum[None, :], out=np.zeros((len(raw_capacity), len(aum))), where=(aum[None, :] > 0)) # cumulative capacity per regime
 
-        # regime-level summary for path-dependent starts/ends
-        regime_target = pd.Series(target).groupby(regime).first().to_numpy() # (R,)
-        regime_maxcap = pd.DataFrame(cum_cap).groupby(regime).last().to_numpy() # (R, A)
+        # regime-level summary for path-dependent starts/ends (avoid pd groupby overhead)
+        regime_starts = np.flatnonzero(regime_change)
+        regime_ends = np.append(regime_starts[1:] - 1, len(regime) - 1)
+
+        regime_target = target[regime_starts] # (R,)
+        regime_maxcap = cum_cap[regime_ends] # (R, A)
 
         # greedily resolving regime endpoints, O(regimes)
         p_start = _resolve_regime_starts(regime_target, np.ascontiguousarray(regime_maxcap))
@@ -185,11 +189,16 @@ class CappedVolumeExecution(ExecutionComponent):
         # greedily resolving fills at each signal event, O(events)
         fills = _resolve_ioc_fills(np.ascontiguousarray(targets), np.ascontiguousarray(caps))
 
-        out = np.full((len(signal_mask), len(aum)), np.nan)
+        out = np.empty((len(signal_mask), len(aum)))
         out[signal_mask] = fills
 
-        # match the portfolio's actual starting state
-        return pd.DataFrame(out, index=ioc.index).ffill().fillna(0).to_numpy()
+        # fwd fill to last resolved event
+        # mask.iloc[0] = True pre-dropna but signal_mask[0] is NOT guaranteed True due to core dropna
+        idx = np.where(signal_mask, np.arange(len(signal_mask)), -1)
+        carry_idx = np.maximum.accumulate(idx)
+        has_prior = carry_idx >= 0
+
+        return np.where(has_prior[:, None], out[np.maximum(carry_idx, 0)], 0)
 
 class WindowRolloverExecution(ExecutionComponent):
     def __init__(self, *, window: int) -> None:
@@ -232,7 +241,7 @@ class WindowRolloverExecution(ExecutionComponent):
         regime_target = target.to_numpy()[regime_starts]
 
         prev_target = np.empty_like(regime_target)
-        prev_target[0] = 0.0
+        prev_target[0] = 0
         prev_target[1:] = regime_target[:-1]
 
         regime_length = np.diff(np.append(regime_starts, n))
