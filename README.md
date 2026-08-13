@@ -13,13 +13,13 @@ backtest_engine/
 ├── __init__.py
 ├── core.py                          Portfolio core class
 ├── data.py                          Alpaca API data fetch, caching, preprocessing
-├── utils.py                         Toy equity series generator, other helpers
+├── utils.py                         Toy equity series generator, internal helpers
 ├── components/
-│   ├── base.py                      Shared BacktestContext config + Strategy/Execution/CostModel base protocols
+│   ├── base.py                      Shared Portfolio BacktestContext config, Strategy/Execution/CostModel interfaces
 │   ├── strategy.py                  Signal generation models
 │   ├── execution.py                 Fill/capacity-constraint models
 │   ├── cost_model.py                Cost models
-│   └── numba_kernel.py              JIT-compiled kernels for execution hot paths
+│   └── numba_kernel.py              Numba optimisation kernels
 └── analysis/
     ├── base.py                      Shared AnalysisReport interface
     ├── metrics.py                   Shared metric dataclasses + computation
