@@ -18,7 +18,8 @@ backtest_engine/
 │   ├── base.py                      Shared BacktestContext config + Strategy/Execution/CostModel base protocols
 │   ├── strategy.py                  Signal generation models
 │   ├── execution.py                 Fill/capacity-constraint models
-│   └── cost_model.py                Cost models
+│   ├── cost_model.py                Cost models
+│   └── numba_kernel.py              JIT-compiled kernels for execution hot paths
 └── analysis/
     ├── base.py                      Shared AnalysisReport interface
     ├── metrics.py                   Shared metric dataclasses + computation
