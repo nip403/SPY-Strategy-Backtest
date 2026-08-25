@@ -4,53 +4,7 @@ import pandas as pd
 import numpy as np
 import numba
 from .base import BacktestContext, StrategyComponent
-
-@numba.njit(cache=True)
-def resolve_positions(signals: np.ndarray) -> np.ndarray:
-    """
-    Sequentially resolve entry/exit/end-of-day signals into a held positions.
-    Due to path-dependency this cannot be vectorised.
-
-    Entry and exit conditions are price checks and not edge-triggered events.
-    Exits are therefore state dependent (depending if a position exists) and take priority.
-
-    A same-direction entry firing while already held is a no-op. An opposite-direction entry
-    firing while held is treated as a direct flip, taking priority over a plain stop-out.
-
-    signals : np.ndarray
-        Boolean array, columns: long_entry, short_entry, long_exit, short_exit, end_of_day.
-
-    Returns np.ndarray
-        Resolved position (sign) per bar.
-    """
-
-    position = np.empty(len(signals))
-    state = 0
-
-    for i in range(len(signals)):
-        le, se, lx, sx, eod = signals[i, 0], signals[i, 1], signals[i, 2], signals[i, 3], signals[i, 4]
-
-        if eod:
-            state = 0
-        elif state > 0: # long
-            if se: # short flip
-                state = -1
-            elif lx: # exit
-                state = 0
-        elif state < 0: # short
-            if le: # long flip
-                state = 1
-            elif sx: # exit
-                state = 0
-        else: # entries
-            if le:
-                state = 1
-            elif se:
-                state = -1
-
-        position[i] = state
-
-    return position
+from .numba_kernel import _resolve_positions
 
 class BaseStrategy(StrategyComponent):
     def set(self, df: pd.DataFrame, ctx: BacktestContext) -> pd.DataFrame:
@@ -78,7 +32,7 @@ class BaseStrategy(StrategyComponent):
 
         end_of_day = df.index.time == pd.Timestamp("15:59").time()
 
-        df["position"] = resolve_positions(np.asarray([long_entry, short_entry, long_exit, short_exit, end_of_day]).T) * (ctx.target_vol / df["std"]).clip(lower=-ctx.max_leverage, upper=ctx.max_leverage)
+        df["position"] = _resolve_positions(np.asarray([long_entry, short_entry, long_exit, short_exit, end_of_day]).T) * (ctx.target_vol / df["std"]).clip(lower=-ctx.max_leverage, upper=ctx.max_leverage)
 
         return df
 
@@ -120,7 +74,7 @@ class RollingImmediateStopStrategy(StrategyComponent):
         short_exit = df["close"] > df["short_stop"]
         end_of_day = df.index.time == pd.Timestamp("15:59").time()
 
-        df["position"] = resolve_positions(np.asarray([long_entry, short_entry, long_exit, short_exit, end_of_day]).T) * (ctx.target_vol / df["std"]).clip(lower=-ctx.max_leverage, upper=ctx.max_leverage)
+        df["position"] = _resolve_positions(np.asarray([long_entry, short_entry, long_exit, short_exit, end_of_day]).T) * (ctx.target_vol / df["std"]).clip(lower=-ctx.max_leverage, upper=ctx.max_leverage)
 
         return df
 
@@ -165,7 +119,7 @@ class RollingIntervalStopStrategy(StrategyComponent):
         short_exit = (df["close"] > df["short_stop"]) & intervals
         end_of_day = df.index.time == pd.Timestamp("15:59").time()
 
-        df["position"] = resolve_positions(np.asarray([long_entry, short_entry, long_exit, short_exit, end_of_day]).T) * (ctx.target_vol / df["std"]).clip(lower=-ctx.max_leverage, upper=ctx.max_leverage)
+        df["position"] = _resolve_positions(np.asarray([long_entry, short_entry, long_exit, short_exit, end_of_day]).T) * (ctx.target_vol / df["std"]).clip(lower=-ctx.max_leverage, upper=ctx.max_leverage)
 
         return df
 
@@ -194,6 +148,6 @@ class QuarterHourSampleStrategy(StrategyComponent):
 
         end_of_day = df.index.time == pd.Timestamp("15:59").time()
 
-        df["position"] = resolve_positions(np.asarray([long_entry, short_entry, long_exit, short_exit, end_of_day]).T) * (ctx.target_vol / df["std"]).clip(lower=-ctx.max_leverage, upper=ctx.max_leverage)
+        df["position"] = _resolve_positions(np.asarray([long_entry, short_entry, long_exit, short_exit, end_of_day]).T) * (ctx.target_vol / df["std"]).clip(lower=-ctx.max_leverage, upper=ctx.max_leverage)
 
         return df

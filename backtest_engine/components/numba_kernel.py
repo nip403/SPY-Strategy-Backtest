@@ -3,6 +3,54 @@ import numba
 
 # prefer contiguous array inputs (& non-broadcasts)
 
+### Strategy ###
+
+@numba.njit(cache=True)
+def _resolve_positions(signals: np.ndarray) -> np.ndarray:
+    """
+    Sequentially resolve entry/exit/end-of-day signals into a held positions.
+    Due to path-dependency this cannot be vectorised.
+
+    Entry and exit conditions are price checks and not edge-triggered events.
+    Exits are therefore state dependent (depending if a position exists) and take priority.
+
+    signals : np.ndarray
+        Boolean array, columns: long_entry, short_entry, long_exit, short_exit, end_of_day.
+
+    Returns np.ndarray
+        Resolved position (sign) per bar.
+    """
+
+    position = np.empty(len(signals))
+    state = 0
+
+    for i in range(len(signals)):
+        le, se, lx, sx, eod = signals[i, 0], signals[i, 1], signals[i, 2], signals[i, 3], signals[i, 4]
+
+        if eod:
+            state = 0
+        elif state > 0: # long
+            if se: # short flip
+                state = -1
+            elif lx: # exit
+                state = 0
+        elif state < 0: # short
+            if le: # long flip
+                state = 1
+            elif sx: # exit
+                state = 0
+        else: # entries
+            if le:
+                state = 1
+            elif se:
+                state = -1
+
+        position[i] = state
+
+    return position
+
+### Execution ###
+
 @numba.njit(cache=True)
 def _resolve_regime_starts(regime_target: np.ndarray, regime_maxcap: np.ndarray) -> np.ndarray:
     """
@@ -72,6 +120,8 @@ def _resolve_ioc_fills(targets: np.ndarray, caps: np.ndarray) -> np.ndarray:
 
     return fills
 
+### Costing ###
+
 @numba.njit(cache=True, parallel=True)
 def _resolve_dynamic_impact(delta_leverage: np.ndarray, close: np.ndarray, volume: np.ndarray, adv: np.ndarray, ann_vol: np.ndarray, aum: np.ndarray, gross: np.ndarray, a1: float, a2: float, a3: float, a4: float, b1: float, commission: float) -> np.ndarray:
     """
@@ -120,6 +170,8 @@ def _resolve_dynamic_impact(delta_leverage: np.ndarray, close: np.ndarray, volum
             out[i, j] = gross[i, j] - mkt - comm
 
     return out
+
+### Decomposition ###
 
 @numba.njit(cache=True, parallel=True)
 def _resolve_split_long_short(position: np.ndarray, ret: np.ndarray, gross: np.ndarray, net: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -178,7 +230,7 @@ def _resolve_split_long_short(position: np.ndarray, ret: np.ndarray, gross: np.n
 
     return pos_long, pos_short, long_ret, short_ret
 
-##### LEGACY #####
+### LEGACY ###
 
 @numba.njit(cache=True)
 def _resolve_window_fills(regime_starts: np.ndarray, window: np.ndarray, prev_target: np.ndarray, regime_target: np.ndarray, volume: np.ndarray) -> np.ndarray:

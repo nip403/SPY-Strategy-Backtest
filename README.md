@@ -48,3 +48,7 @@ py -3.12 -m pytest --cov=backtest_engine --cov-report=term-missing -ra  # covera
 - end to end recommendation engine (book, bench, portfolio -> rec)
 - out of sample testing
 - logging, maybe
+
+### Disclaimer
+
+Test suite was fully made with Claude.
