@@ -215,7 +215,12 @@ class PortfolioDecomposer(AnalysisReport):
         xs = np.linspace(-global_xlim, global_xlim, 200)
 
         for col in ret.columns:
-            kde = gaussian_kde(ret[col].values)
+            values = ret[col].values
+
+            if np.isclose(np.std(values), 0): # long/short leg disabled
+                continue
+
+            kde = gaussian_kde(values)
             ax_kde.plot(xs, kde(xs), label=col, color=colours[col], linewidth=1)
 
         ax_kde.set_title("Overlayed (Continuous, Gaussian KDE)", fontsize=11, fontweight="bold")
